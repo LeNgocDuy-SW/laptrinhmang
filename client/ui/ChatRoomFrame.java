@@ -30,14 +30,22 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
     private final String currentRole;
 
     private String activeRoom = "Friends & Family";
+    private String activeGroupCreator = "admin";
     private String privateChatTarget = null; // null = chat nhóm
     private boolean isMuted = false;
+
+    // Trạng thái trả lời tin nhắn (Reply)
+    private String replyTargetSender = null;
+    private String replyTargetSnippet = null;
+    private JPanel replyPreviewBar;
+    private JLabel lblReplyPreview;
 
     // Danh sách nhóm mà người dùng này đã mở khóa bằng mã
     private final Set<String> unlockedGroups = new HashSet<>();
 
     // Danh sách dữ liệu
     private List<User> onlineUsers = new ArrayList<>();
+    private List<String[]> groupMembers = new ArrayList<>();
     private final List<GroupItemPanel> groupPanels = new ArrayList<>();
     private final JPanel groupsScrollContainer;
 
@@ -57,6 +65,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
     private JLabel lblRightGroupTitle;
     private JLabel lblRightMemberCount;
     private JPanel membersListContainer;
+    private JPanel leaderControlsPanel;
 
     public ChatRoomFrame(SocketClient socketClient, String username, String role) {
         super("Multi-Client Chat - " + username + " (" + role + ")");
@@ -79,14 +88,13 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         initComponents();
         setupEvents();
 
-        // Nạp danh sách khi vừa khởi động
+        // Nạp danh sách & lịch sử nhóm mặc định khi vừa khởi động
         if (socketClient != null) {
             socketClient.requestUserList();
             socketClient.requestGroupList();
+            socketClient.requestHistory(activeRoom);
+            socketClient.requestGroupMembers(activeRoom);
         }
-
-        // Nhắc nhở tính năng tạo nhóm hoặc nhập mã sau khi đăng nhập
-        SwingUtilities.invokeLater(() -> promptWelcomeOptions());
     }
 
     private void initComponents() {
@@ -178,7 +186,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         scrollContent.add(Box.createVerticalStrut(16));
 
         // Mục Groups
-        JLabel lblGroups = new JLabel("Groups (Yêu Cầu Mã)");
+        JLabel lblGroups = new JLabel("Groups (Nhóm Người Dùng Tạo)");
         lblGroups.setFont(new Font("Segoe UI", Font.BOLD, 13));
         lblGroups.setForeground(UIUtils.TEXT_SECONDARY);
         lblGroups.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -232,9 +240,14 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         headerRight.setOpaque(false);
 
         PillButton btnCreateGroupQuick = new PillButton("✨ Tạo Nhóm", PillButton.Style.SECONDARY);
-        btnCreateGroupQuick.setPreferredSize(new Dimension(100, 32));
+        btnCreateGroupQuick.setPreferredSize(new Dimension(105, 32));
         btnCreateGroupQuick.addActionListener(e -> new CreateGroupDialog(this, socketClient).setVisible(true));
         headerRight.add(btnCreateGroupQuick);
+
+        PillButton btnJoinGroupQuick = new PillButton("🔑 Tham Gia Nhóm", PillButton.Style.PRIMARY);
+        btnJoinGroupQuick.setPreferredSize(new Dimension(135, 32));
+        btnJoinGroupQuick.addActionListener(e -> new JoinGroupDialog(this, socketClient, "").setVisible(true));
+        headerRight.add(btnJoinGroupQuick);
 
         chatHeader.add(headerRight, BorderLayout.EAST);
         center.add(chatHeader, BorderLayout.NORTH);
@@ -255,10 +268,31 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
 
         center.add(scrollMessages, BorderLayout.CENTER);
 
-        // 3. Thanh nhập liệu Pill
-        JPanel bottomWrap = new JPanel(new BorderLayout());
+        // 3. Thanh trả lời tin nhắn (Reply Preview) + Thanh nhập liệu Pill
+        JPanel bottomWrap = new JPanel(new BorderLayout(0, 6));
         bottomWrap.setBackground(Color.WHITE);
-        bottomWrap.setBorder(new EmptyBorder(12, 20, 16, 20));
+        bottomWrap.setBorder(new EmptyBorder(8, 20, 16, 20));
+
+        replyPreviewBar = new JPanel(new BorderLayout(8, 0));
+        replyPreviewBar.setBackground(new Color(239, 246, 255));
+        replyPreviewBar.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 3, 0, 0, UIUtils.PRIMARY_BLUE),
+                new EmptyBorder(6, 10, 6, 10)
+        ));
+        lblReplyPreview = new JLabel("↩ Đang trả lời...");
+        lblReplyPreview.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        lblReplyPreview.setForeground(UIUtils.TEXT_DARK);
+        JButton btnCancelReply = new JButton("✕");
+        btnCancelReply.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        btnCancelReply.setForeground(UIUtils.TEXT_MUTED);
+        btnCancelReply.setContentAreaFilled(false);
+        btnCancelReply.setBorder(null);
+        btnCancelReply.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        btnCancelReply.addActionListener(e -> clearReplyState());
+        replyPreviewBar.add(lblReplyPreview, BorderLayout.CENTER);
+        replyPreviewBar.add(btnCancelReply, BorderLayout.EAST);
+        replyPreviewBar.setVisible(false);
+        bottomWrap.add(replyPreviewBar, BorderLayout.NORTH);
 
         JPanel pillInputBox = new JPanel(new BorderLayout(8, 0)) {
             @Override
@@ -415,6 +449,48 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         membersSection.add(scrollMembers, BorderLayout.CENTER);
         right.add(membersSection, BorderLayout.CENTER);
 
+        // Thanh đặc quyền Trưởng nhóm ở đáy sidebar phải
+        leaderControlsPanel = new JPanel(new GridLayout(3, 1, 0, 6));
+        leaderControlsPanel.setOpaque(false);
+        leaderControlsPanel.setBorder(BorderFactory.createTitledBorder("👑 Đặc Quyền Trưởng Nhóm"));
+
+        PillButton btnChangePin = new PillButton("🔑 Đổi Mã PIN Nhóm", PillButton.Style.SECONDARY);
+        btnChangePin.addActionListener(e -> {
+            String newPin = JOptionPane.showInputDialog(this, "Nhập mã PIN mới cho nhóm [" + activeRoom + "]:", "Đổi Mã Nhóm", JOptionPane.QUESTION_MESSAGE);
+            if (newPin != null && !newPin.trim().isEmpty()) {
+                socketClient.sendGroupCommand(Protocol.GACT_SET_CODE, activeRoom, newPin.trim());
+            }
+        });
+
+        PillButton btnClearGrpHist = new PillButton("🧹 Xóa Lịch Sử Nhóm", PillButton.Style.SECONDARY);
+        btnClearGrpHist.addActionListener(e -> {
+            int cf = JOptionPane.showConfirmDialog(this, "Xóa toàn bộ tin nhắn trong nhóm [" + activeRoom + "]?", "Xác nhận", JOptionPane.YES_NO_OPTION);
+            if (cf == JOptionPane.YES_OPTION) {
+                socketClient.sendGroupCommand(Protocol.GACT_CLEAR_HISTORY, activeRoom, "");
+                messagesContainer.removeAll();
+                messagesContainer.revalidate();
+                messagesContainer.repaint();
+            }
+        });
+
+        PillButton btnDeleteGrp = new PillButton("🗑️ Giải Tán Nhóm", PillButton.Style.DANGER);
+        btnDeleteGrp.addActionListener(e -> {
+            if (Protocol.DEFAULT_GROUP.equalsIgnoreCase(activeRoom)) {
+                JOptionPane.showMessageDialog(this, "Không thể xóa phòng mặc định!", "Thông báo", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            int cf = JOptionPane.showConfirmDialog(this, "Bạn chắc chắn muốn giải tán vĩnh viễn nhóm [" + activeRoom + "]?", "Giải Tán Nhóm", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (cf == JOptionPane.YES_OPTION) {
+                socketClient.sendGroupCommand(Protocol.GACT_DELETE, activeRoom, "");
+            }
+        });
+
+        leaderControlsPanel.add(btnChangePin);
+        leaderControlsPanel.add(btnClearGrpHist);
+        leaderControlsPanel.add(btnDeleteGrp);
+        leaderControlsPanel.setVisible(false);
+        right.add(leaderControlsPanel, BorderLayout.SOUTH);
+
         return right;
     }
 
@@ -445,6 +521,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         // Đã mở khóa -> Chuyển phòng
         this.activeRoom = groupName;
         this.privateChatTarget = null;
+        clearReplyState();
 
         favouritesCard.setSelected("Friends & Family".equalsIgnoreCase(groupName));
         for (GroupItemPanel g : groupPanels) {
@@ -456,36 +533,66 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         lblChatSubtitle.setText("🟢 " + Math.max(1, onlineUsers.size()) + " Online");
         lblRightGroupTitle.setText(groupName);
 
-        // Xóa tin nhắn hiện tại và yêu cầu Server gửi lại lịch sử của nhóm này
+        // Xóa tin nhắn cũ trên màn hình và yêu cầu Server nạp lịch sử + danh sách thành viên nhóm
         messagesContainer.removeAll();
         messagesContainer.revalidate();
         messagesContainer.repaint();
 
-        socketClient.sendPacket(Protocol.CMD_MSG_GROUP + Protocol.DELIMITER + groupName + Protocol.DELIMITER + "[JOIN_NOTIFY]");
+        socketClient.requestHistory(groupName);
+        socketClient.requestGroupMembers(groupName);
         txtChatInput.requestFocus();
     }
 
-    private void performSendMessage() {
+    private void setReplyTarget(String sender, String snippet) {
+        this.replyTargetSender = sender;
+        this.replyTargetSnippet = snippet != null ? snippet.replace("\n", " ").replace("|", "/") : "";
+        String shortSnip = replyTargetSnippet.length() > 45 ? replyTargetSnippet.substring(0, 45) + "..." : replyTargetSnippet;
+        lblReplyPreview.setText("<html><b>↩ Đang trả lời @" + sender + ":</b> " + shortSnip + "</html>");
+        replyPreviewBar.setVisible(true);
+        txtChatInput.requestFocus();
+    }
+
+    private void clearReplyState() {
+        this.replyTargetSender = null;
+        this.replyTargetSnippet = null;
+        if (replyPreviewBar != null) {
+            replyPreviewBar.setVisible(false);
+        }
+    }
+
+    private void sendFormattedContent(String rawContent) {
         if (isMuted) {
             JOptionPane.showMessageDialog(this, "Bạn đang bị cấm chat bởi Admin!", "Thông báo", JOptionPane.WARNING_MESSAGE);
             return;
         }
+        if (rawContent == null || rawContent.trim().isEmpty()) return;
 
+        String payloadContent = rawContent.trim();
+        if (replyTargetSender != null) {
+            String safeSnip = replyTargetSnippet != null ? replyTargetSnippet.replace("]]", ")") : "";
+            payloadContent = "[[REPLY|" + replyTargetSender + "|" + safeSnip + "]]" + payloadContent;
+            clearReplyState();
+        }
+
+        if (privateChatTarget != null) {
+            socketClient.sendPrivateMessage(privateChatTarget, payloadContent);
+        } else {
+            socketClient.sendGroupMessage(activeRoom, payloadContent);
+        }
+    }
+
+    private void performSendMessage() {
         String text = txtChatInput.getText().trim();
         if (text.isEmpty()) return;
 
-        if (privateChatTarget != null) {
-            socketClient.sendPrivateMessage(privateChatTarget, text);
-        } else {
-            socketClient.sendGroupMessage(activeRoom, text);
-        }
-
+        sendFormattedContent(text);
         txtChatInput.setText("");
         txtChatInput.requestFocus();
     }
 
     private void addMessageBubble(String sender, String role, String time, String content, boolean isMine, boolean isPrivate, boolean isSystem) {
-        MessageBubblePanel bubble = new MessageBubblePanel(sender, role, time, content, isMine, isPrivate, isSystem);
+        MessageBubblePanel bubble = new MessageBubblePanel(sender, role, time, content, isMine, isPrivate, isSystem,
+                isSystem ? null : (s, snip) -> setReplyTarget(s, snip));
         bubble.setAlignmentX(Component.LEFT_ALIGNMENT);
         messagesContainer.add(bubble);
         messagesContainer.revalidate();
@@ -505,13 +612,8 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         itemCreate.addActionListener(e -> new CreateGroupDialog(this, socketClient).setVisible(true));
         menu.add(itemCreate);
 
-        JMenuItem itemJoin = new JMenuItem("🔑 Nhập Mã PIN Để Tham Gia Nhóm");
-        itemJoin.addActionListener(e -> {
-            String gName = JOptionPane.showInputDialog(this, "Nhập tên nhóm bạn muốn tham gia:", "Tham gia nhóm", JOptionPane.QUESTION_MESSAGE);
-            if (gName != null && !gName.trim().isEmpty()) {
-                new JoinGroupDialog(this, socketClient, gName.trim()).setVisible(true);
-            }
-        });
+        JMenuItem itemJoin = new JMenuItem("🔑 Tham Gia Nhóm Bằng Mã");
+        itemJoin.addActionListener(e -> new JoinGroupDialog(this, socketClient, "").setVisible(true));
         menu.add(itemJoin);
 
         JMenuItem itemPrivate = new JMenuItem("💬 Bắt Đầu Chat Riêng 1-1 Với Người Dùng");
@@ -542,71 +644,103 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         txtChatInput.requestFocus();
     }
 
-    private void promptWelcomeOptions() {
-        int choice = JOptionPane.showOptionDialog(
-                this,
-                "Xin chào " + currentUsername + "! Bạn có muốn tạo phòng nhóm mới hoặc tham gia nhóm bằng mã PIN không?",
-                "Tùy Chọn Nhóm Chat",
-                JOptionPane.YES_NO_CANCEL_OPTION,
-                JOptionPane.QUESTION_MESSAGE,
-                null,
-                new String[]{"✨ Tạo Nhóm Mới", "🔑 Nhập Mã Vào Nhóm", "Vào Phòng Mặc Định"},
-                "Vào Phòng Mặc Định"
-        );
-
-        if (choice == 0) {
-            new CreateGroupDialog(this, socketClient).setVisible(true);
-        } else if (choice == 1) {
-            String gName = JOptionPane.showInputDialog(this, "Nhập tên nhóm bạn muốn vào:", "Nhập mã nhóm", JOptionPane.QUESTION_MESSAGE);
-            if (gName != null && !gName.trim().isEmpty()) {
-                new JoinGroupDialog(this, socketClient, gName.trim()).setVisible(true);
-            }
-        }
+    private boolean isCurrentGroupLeader() {
+        return (activeGroupCreator != null && activeGroupCreator.equalsIgnoreCase(currentUsername))
+                || Protocol.ROLE_ADMIN.equalsIgnoreCase(currentRole);
     }
 
     private void refreshMembersUI() {
         membersListContainer.removeAll();
 
-        User me = new User(currentUsername, currentRole, isMuted ? Protocol.STATUS_MUTED : Protocol.STATUS_ACTIVE);
-        MemberItemPanel meItem = new MemberItemPanel(me, true, () -> {});
-        meItem.setAlignmentX(Component.LEFT_ALIGNMENT);
-        membersListContainer.add(meItem);
-
-        for (User u : onlineUsers) {
-            if (u.getUsername().equalsIgnoreCase(currentUsername)) continue;
-            MemberItemPanel item = new MemberItemPanel(u, false, () -> showUserActionsPopup(u));
-            item.setAlignmentX(Component.LEFT_ALIGNMENT);
-            membersListContainer.add(item);
+        if (leaderControlsPanel != null) {
+            leaderControlsPanel.setVisible(privateChatTarget == null && isCurrentGroupLeader());
         }
 
-        lblRightMemberCount.setText("Members (" + (onlineUsers.size()) + ")");
-        lblChatSubtitle.setText("🟢 " + Math.max(1, onlineUsers.size()) + " Online");
+        if (!groupMembers.isEmpty() && privateChatTarget == null) {
+            int onlineInGrp = 0;
+            for (String[] m : groupMembers) {
+                String uname = m[0];
+                boolean isOnline = "1".equals(m[1]);
+                boolean isGrpMuted = "1".equals(m[2]);
+                if (isOnline) onlineInGrp++;
+
+                boolean isMe = uname.equalsIgnoreCase(currentUsername);
+                boolean isLeader = uname.equalsIgnoreCase(activeGroupCreator);
+                String displayRole = isLeader ? "TRƯỞNG NHÓM" : "USER";
+                String status = isGrpMuted ? Protocol.STATUS_MUTED : (isOnline ? Protocol.STATUS_ACTIVE : "OFFLINE");
+
+                User u = new User(uname, isLeader ? Protocol.ROLE_ADMIN : displayRole, status);
+                MemberItemPanel item = new MemberItemPanel(u, isMe, isMe ? () -> {} : () -> showUserActionsPopup(u, isGrpMuted));
+                item.setAlignmentX(Component.LEFT_ALIGNMENT);
+                membersListContainer.add(item);
+            }
+            lblRightMemberCount.setText("Thành viên nhóm (" + groupMembers.size() + ")");
+            lblChatSubtitle.setText("👥 " + groupMembers.size() + " Thành viên • 🟢 " + Math.max(1, onlineInGrp) + " Online");
+        } else {
+            User me = new User(currentUsername, currentRole, isMuted ? Protocol.STATUS_MUTED : Protocol.STATUS_ACTIVE);
+            MemberItemPanel meItem = new MemberItemPanel(me, true, () -> {});
+            meItem.setAlignmentX(Component.LEFT_ALIGNMENT);
+            membersListContainer.add(meItem);
+
+            for (User u : onlineUsers) {
+                if (u.getUsername().equalsIgnoreCase(currentUsername)) continue;
+                MemberItemPanel item = new MemberItemPanel(u, false, () -> showUserActionsPopup(u, u.isMuted()));
+                item.setAlignmentX(Component.LEFT_ALIGNMENT);
+                membersListContainer.add(item);
+            }
+            lblRightMemberCount.setText("Members (" + onlineUsers.size() + ")");
+            if (privateChatTarget == null) {
+                lblChatSubtitle.setText("👥 " + Math.max(1, onlineUsers.size()) + " Thành viên • 🟢 " + Math.max(1, onlineUsers.size()) + " Online");
+            }
+        }
+
         favouritesCard.setOnlineCount(Math.max(1, onlineUsers.size()));
 
         membersListContainer.revalidate();
         membersListContainer.repaint();
     }
 
-    private void showUserActionsPopup(User target) {
+    private void showUserActionsPopup(User target, boolean isGrpMuted) {
         JPopupMenu menu = new JPopupMenu();
 
         JMenuItem itemMsg = new JMenuItem("💬 Nhắn tin riêng với @" + target.getUsername());
         itemMsg.addActionListener(e -> switchToPrivateChat(target.getUsername()));
         menu.add(itemMsg);
 
+        // Đặc quyền Trưởng Nhóm (trên nhóm đang mở)
+        if (privateChatTarget == null && isCurrentGroupLeader() && !target.getUsername().equalsIgnoreCase(currentUsername)) {
+            menu.addSeparator();
+            if (isGrpMuted) {
+                JMenuItem itemUnmuteGrp = new JMenuItem("🔊 Mở chặn nhắn tin trong nhóm [" + activeRoom + "]");
+                itemUnmuteGrp.addActionListener(e -> socketClient.sendGroupCommand(Protocol.GACT_UNMUTE, activeRoom, target.getUsername()));
+                menu.add(itemUnmuteGrp);
+            } else {
+                JMenuItem itemMuteGrp = new JMenuItem("🔇 Chặn @" + target.getUsername() + " nhắn tin trong nhóm");
+                itemMuteGrp.addActionListener(e -> socketClient.sendGroupCommand(Protocol.GACT_MUTE, activeRoom, target.getUsername()));
+                menu.add(itemMuteGrp);
+            }
+
+            if (!Protocol.DEFAULT_GROUP.equalsIgnoreCase(activeRoom)) {
+                JMenuItem itemKickGrp = new JMenuItem("👢 Kick @" + target.getUsername() + " khỏi nhóm [" + activeRoom + "]");
+                itemKickGrp.setForeground(UIUtils.BADGE_RED);
+                itemKickGrp.addActionListener(e -> socketClient.sendGroupCommand(Protocol.GACT_KICK, activeRoom, target.getUsername()));
+                menu.add(itemKickGrp);
+            }
+        }
+
         if (Protocol.ROLE_ADMIN.equalsIgnoreCase(currentRole)) {
             menu.addSeparator();
 
-            JMenuItem itemKick = new JMenuItem("👢 Kick @" + target.getUsername() + " khỏi phòng");
+            JMenuItem itemKick = new JMenuItem("👢 [ADMIN] Kick @" + target.getUsername() + " khỏi Server");
             itemKick.addActionListener(e -> socketClient.sendAdminCommand(Protocol.ACT_KICK, target.getUsername(), "Bị Admin đuổi"));
             menu.add(itemKick);
 
             if (target.isMuted()) {
-                JMenuItem itemUnmute = new JMenuItem("🔊 Mở cấm chat @" + target.getUsername());
+                JMenuItem itemUnmute = new JMenuItem("🔊 [ADMIN] Mở cấm chat toàn hệ thống");
                 itemUnmute.addActionListener(e -> socketClient.sendAdminCommand(Protocol.ACT_UNMUTE, target.getUsername(), ""));
                 menu.add(itemUnmute);
             } else {
-                JMenu menuMute = new JMenu("🔇 Cấm chat @" + target.getUsername());
+                JMenu menuMute = new JMenu("🔇 [ADMIN] Cấm chat toàn hệ thống");
                 JMenuItem m5 = new JMenuItem("5 phút");
                 m5.addActionListener(e -> socketClient.sendAdminCommand(Protocol.ACT_MUTE, target.getUsername(), "5"));
                 JMenuItem mForever = new JMenuItem("Vô thời hạn");
@@ -616,13 +750,13 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
                 menu.add(menuMute);
             }
 
-            JMenuItem itemBan = new JMenuItem("🔒 Khóa tài khoản (BAN)");
+            JMenuItem itemBan = new JMenuItem("🔒 [ADMIN] Khóa tài khoản (BAN)");
             itemBan.setForeground(UIUtils.BADGE_RED);
             itemBan.addActionListener(e -> socketClient.sendAdminCommand(Protocol.ACT_BAN, target.getUsername(), "Vi phạm quy tắc"));
             menu.add(itemBan);
         }
 
-        menu.show(this, getWidth() - 250, 180);
+        menu.show(this, getWidth() - 260, 180);
     }
 
     private void filterSidebar() {
@@ -664,11 +798,21 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
     }
 
     private void showEmojiPicker() {
-        JPopupMenu emojiMenu = new JPopupMenu();
-        String[] emojis = {"😀", "😂", "😍", "👍", "❤️", "🎉", "🔥", "🚀", "👏", "💯", "😎", "🥳"};
-        JPanel grid = new JPanel(new GridLayout(3, 4, 4, 4));
-        grid.setBackground(Color.WHITE);
-        grid.setBorder(new EmptyBorder(6, 6, 6, 6));
+        JPopupMenu pickerPopup = new JPopupMenu();
+        JTabbedPane tabs = new JTabbedPane();
+        tabs.setFont(new Font("Segoe UI", Font.BOLD, 12));
+
+        // Tab 1: 30 Emoji biểu cảm
+        String[] emojis = {
+                "😀", "😂", "🥹", "😍", "🥰", "😎",
+                "🥳", "🤩", "🤔", "😭", "😡", "🤯",
+                "👍", "👎", "👏", "🙏", "🤝", "✌️",
+                "❤️", "💔", "🔥", "⭐", "🎉", "🚀",
+                "💯", "👀", "☕", "🍕", "🎵", "✨"
+        };
+        JPanel emojiGrid = new JPanel(new GridLayout(5, 6, 4, 4));
+        emojiGrid.setBackground(Color.WHITE);
+        emojiGrid.setBorder(new EmptyBorder(8, 8, 8, 8));
 
         for (String emo : emojis) {
             JButton btn = new JButton(emo);
@@ -678,14 +822,41 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
             btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
             btn.addActionListener(e -> {
                 txtChatInput.setText(txtChatInput.getText() + emo);
-                emojiMenu.setVisible(false);
+                pickerPopup.setVisible(false);
                 txtChatInput.requestFocus();
             });
-            grid.add(btn);
+            emojiGrid.add(btn);
         }
+        tabs.addTab("😊 Icon", emojiGrid);
 
-        emojiMenu.add(grid);
-        emojiMenu.show(btnSend, -120, -110);
+        // Tab 2: 12 Sticker sinh động gửi trực tiếp
+        String[][] stickers = {
+                {"👋", "Xin chào!"}, {"😂", "Cười xỉu"}, {"❤️", "Yêu quá!"}, {"👍", "Quá chuẩn"},
+                {"🔥", "Cháy quá"}, {"🚀", "Chốt đơn!"}, {"😢", "Buồn ghê"}, {"🌙", "Ngủ ngon"},
+                {"🙏", "Cảm ơn!"}, {"⭐", "Tuyệt vời"}, {"👀", "Hóng biến"}, {"🎉", "Chúc mừng"}
+        };
+        JPanel stickerGrid = new JPanel(new GridLayout(3, 4, 6, 6));
+        stickerGrid.setBackground(Color.WHITE);
+        stickerGrid.setBorder(new EmptyBorder(8, 8, 8, 8));
+
+        for (String[] st : stickers) {
+            JButton sBtn = new JButton("<html><center><span style='font-size:18px'>" + st[0] + "</span><br><span style='font-size:9px'>" + st[1] + "</span></center></html>");
+            sBtn.setBackground(new Color(240, 249, 255));
+            sBtn.setFocusPainted(false);
+            sBtn.setBorder(BorderFactory.createLineBorder(new Color(191, 219, 254), 1));
+            sBtn.setPreferredSize(new Dimension(74, 54));
+            sBtn.setCursor(new Cursor(Cursor.HAND_CURSOR));
+            sBtn.addActionListener(e -> {
+                sendFormattedContent("[[STICKER|" + st[0] + "|" + st[1] + "]]");
+                pickerPopup.setVisible(false);
+                txtChatInput.requestFocus();
+            });
+            stickerGrid.add(sBtn);
+        }
+        tabs.addTab("🎨 Sticker", stickerGrid);
+
+        pickerPopup.add(tabs);
+        pickerPopup.show(btnSend, -250, -260);
     }
 
     private void sendFileAttachment() {
@@ -761,10 +932,17 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
     public void onJoinGroupResult(boolean success, String groupName, String message) {
         if (success) {
             unlockedGroups.add(groupName);
-            JOptionPane.showMessageDialog(this, "Đã mở khóa và tham gia nhóm [" + groupName + "] thành công!", "Thành Công", JOptionPane.INFORMATION_MESSAGE);
             onSelectGroup(groupName);
+            JOptionPane.showMessageDialog(this, "Đã mở khóa và tham gia nhóm [" + groupName + "] thành công!", "Thành Công", JOptionPane.INFORMATION_MESSAGE);
         } else {
             JOptionPane.showMessageDialog(this, message, "Không Thể Vào Nhóm", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    @Override
+    public void onMyGroupsReceived(List<String> joinedGroups) {
+        if (joinedGroups != null) {
+            unlockedGroups.addAll(joinedGroups);
         }
     }
 
@@ -772,10 +950,20 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
     public void onGroupListUpdated(List<ChatGroup> groups) {
         groupsScrollContainer.removeAll();
         groupPanels.clear();
+        unlockedGroups.clear();
+        unlockedGroups.add(Protocol.DEFAULT_GROUP);
 
+        boolean stillInActive = Protocol.DEFAULT_GROUP.equalsIgnoreCase(activeRoom);
+        int userGroupCount = 0;
         for (ChatGroup g : groups) {
+            unlockedGroups.add(g.getGroupName());
+            if (g.getGroupName().equalsIgnoreCase(activeRoom)) {
+                stillInActive = true;
+            }
             if ("Friends & Family".equalsIgnoreCase(g.getGroupName())) continue;
-            GroupItemPanel item = new GroupItemPanel(g.getGroupName(), g.getMemberCount() + " Members • 🔐 Mã PIN", 0, () -> onSelectGroup(g.getGroupName()));
+            userGroupCount++;
+            String sub = g.getMemberCount() + " Thành viên • 👑 " + (g.getCreator().isEmpty() ? "admin" : g.getCreator());
+            GroupItemPanel item = new GroupItemPanel(g.getGroupName(), sub, 0, () -> onSelectGroup(g.getGroupName()));
             item.setSelected(g.getGroupName().equalsIgnoreCase(activeRoom));
             item.setAlignmentX(Component.LEFT_ALIGNMENT);
             groupPanels.add(item);
@@ -783,14 +971,47 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
             groupsScrollContainer.add(Box.createVerticalStrut(4));
         }
 
+        if (userGroupCount == 0) {
+            JLabel lblEmpty = new JLabel("<html><i>Chưa tham gia nhóm nào.<br>Bấm <b>+</b> hoặc <b>Tham Gia Nhóm</b>!</i></html>");
+            lblEmpty.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+            lblEmpty.setForeground(UIUtils.TEXT_MUTED);
+            lblEmpty.setBorder(new EmptyBorder(6, 6, 6, 6));
+            lblEmpty.setAlignmentX(Component.LEFT_ALIGNMENT);
+            groupsScrollContainer.add(lblEmpty);
+        }
+
         groupsScrollContainer.revalidate();
         groupsScrollContainer.repaint();
+
+        if (!stillInActive) {
+            onSelectGroup(Protocol.DEFAULT_GROUP);
+        }
+    }
+
+    @Override
+    public void onGroupMembersUpdated(String groupName, String creator, List<String[]> members) {
+        if (groupName.equalsIgnoreCase(activeRoom)) {
+            this.activeGroupCreator = creator != null ? creator : "";
+            this.groupMembers = new ArrayList<>(members);
+            refreshMembersUI();
+        }
+    }
+
+    @Override
+    public void onGroupKicked(String groupName, String reason) {
+        unlockedGroups.removeIf(g -> g.equalsIgnoreCase(groupName));
+        if (groupName.equalsIgnoreCase(activeRoom)) {
+            onSelectGroup(Protocol.DEFAULT_GROUP);
+        }
     }
 
     @Override
     public void onUserListUpdated(List<User> onlineUsers) {
         this.onlineUsers = new ArrayList<>(onlineUsers);
         refreshMembersUI();
+        if (socketClient != null && activeRoom != null) {
+            socketClient.requestGroupMembers(activeRoom);
+        }
 
         for (User u : onlineUsers) {
             if (u.getUsername().equalsIgnoreCase(currentUsername)) {

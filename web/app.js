@@ -11,9 +11,66 @@ const state = {
     groups: [],
     onlineUsers: [],
     eventSource: null,
+    syncIntervalId: null,
     isRegisterMode: false,
-    renderedMessages: new Set() // Dùng để chống trùng lặp tin nhắn
+    renderedMessages: new Set(), // Dùng để chống trùng lặp tin nhắn
+    replyTarget: null,           // { sender, snippet }
+    activeGroupInfo: null        // Dữ liệu chi tiết thành viên & Trưởng nhóm
 };
+
+const SESSION_STORAGE_KEY = "cloud_chat_session";
+
+function saveSession() {
+    if (!state.currentUser) return;
+    const payload = JSON.stringify({
+        username: state.currentUser,
+        role: state.currentRole || "USER",
+        activeRoom: state.activeRoom || "Friends & Family"
+    });
+    try {
+        sessionStorage.setItem(SESSION_STORAGE_KEY, payload);
+        const rememberEl = document.getElementById("rememberMe");
+        if ((rememberEl && rememberEl.checked) || localStorage.getItem(SESSION_STORAGE_KEY)) {
+            localStorage.setItem(SESSION_STORAGE_KEY, payload);
+        }
+    } catch (ignored) {}
+}
+
+function clearSession() {
+    try {
+        sessionStorage.removeItem(SESSION_STORAGE_KEY);
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch (ignored) {}
+}
+
+async function restoreSessionOnLoad() {
+    let raw = null;
+    try {
+        raw = sessionStorage.getItem(SESSION_STORAGE_KEY) || localStorage.getItem(SESSION_STORAGE_KEY);
+    } catch (ignored) {}
+    if (!raw) return;
+
+    try {
+        const saved = JSON.parse(raw);
+        if (!saved || !saved.username) return;
+
+        const res = await fetch(`/api/session?user=${encodeURIComponent(saved.username)}`);
+        const data = await res.json();
+        if (res.ok && data.success) {
+            state.currentUser = data.username;
+            state.currentRole = data.role || "USER";
+            state.activeRoom = saved.activeRoom || "Friends & Family";
+            saveSession();
+            enterChatScreen();
+        } else {
+            clearSession();
+        }
+    } catch (err) {
+        // Nếu server tạm gián đoạn khi vừa tải trang, vẫn giữ bản lưu để người dùng thử lại
+    }
+}
+
+window.addEventListener("DOMContentLoaded", restoreSessionOnLoad);
 
 // ==========================================================================
 // 1. XỬ LÝ ĐĂNG NHẬP & ĐĂNG KÝ (NEUMORPHIC AUTH SCREEN)
@@ -24,7 +81,6 @@ function toggleAuthMode() {
     const title = document.getElementById("authTitle");
     const subtitle = document.getElementById("authSubtitle");
     const btnText = document.getElementById("btnAuthText");
-    const roleRow = document.getElementById("roleSelectRow");
     const rememberRow = document.getElementById("rememberRow");
     const prompt = document.getElementById("togglePrompt");
     const actionLink = document.getElementById("toggleActionLink");
@@ -33,7 +89,6 @@ function toggleAuthMode() {
         title.innerText = "Create Account";
         subtitle.innerText = "Sign up to get started";
         btnText.innerText = "Sign Up";
-        roleRow.style.display = "flex";
         rememberRow.style.display = "none";
         prompt.innerText = "Already have an account?";
         actionLink.innerHTML = "<b>Sign in</b>";
@@ -41,7 +96,6 @@ function toggleAuthMode() {
         title.innerText = "Welcome Back";
         subtitle.innerText = "Sign in to continue";
         btnText.innerText = "Login";
-        roleRow.style.display = "none";
         rememberRow.style.display = "flex";
         prompt.innerText = "Don't have an account?";
         actionLink.innerHTML = "<b>Sign up</b>";
@@ -57,7 +111,6 @@ async function handleAuthSubmit(e) {
     e.preventDefault();
     const user = document.getElementById("authUsername").value.trim();
     const pass = document.getElementById("authPassword").value.trim();
-    const role = document.getElementById("authRole").value;
     const statusEl = document.getElementById("authStatus");
 
     if (!user || !pass) return;
@@ -70,7 +123,7 @@ async function handleAuthSubmit(e) {
             const res = await fetch("/api/register", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username: user, password: pass, role: role })
+                body: JSON.stringify({ username: user, password: pass, role: "USER" })
             });
             const data = await res.json();
             if (data.success) {
@@ -91,6 +144,8 @@ async function handleAuthSubmit(e) {
             if (data.success) {
                 state.currentUser = data.username;
                 state.currentRole = data.role || "USER";
+                state.activeRoom = "Friends & Family";
+                saveSession();
                 enterChatScreen();
             } else {
                 statusEl.innerText = "❌ " + (data.message || "Đăng nhập thất bại");
@@ -103,25 +158,46 @@ async function handleAuthSubmit(e) {
     }
 }
 
-function enterChatScreen() {
+async function enterChatScreen() {
     document.getElementById("authScreen").style.display = "none";
     document.getElementById("chatScreen").style.display = "flex";
+    closeModal("modalCreateGroup");
+    closeModal("modalJoinGroup");
 
     // Cập nhật Profile
     document.getElementById("myDisplayName").innerText = state.currentUser;
     document.getElementById("myAvatar").innerText = state.currentUser.substring(0, 1).toUpperCase();
 
+    // Khởi tạo bảng chọn Emoji & Sticker
+    initEmojiStickerPicker();
+
     // Khởi tạo luồng SSE Real-time
     initEventSource();
 
-    // Nạp danh sách nhóm và lịch sử chat mặc định
-    loadGroups();
-    loadHistory(state.activeRoom);
+    // Nạp danh sách nhóm trước để kiểm tra xem phòng hiện tại còn hợp lệ không
+    await loadGroups();
+    if (state.activeRoom !== "Friends & Family") {
+        const stillInGroup = state.groups.some(g => g.name.toLowerCase() === state.activeRoom.toLowerCase());
+        if (!stillInGroup) {
+            state.activeRoom = "Friends & Family";
+            saveSession();
+        }
+    }
 
-    // Kích hoạt đồng bộ dự phòng mỗi 3 giây
-    setInterval(() => {
+    document.getElementById("favCard").classList.toggle("active", state.activeRoom === "Friends & Family");
+    document.getElementById("activeChatTitle").innerText = state.activeRoom;
+    document.getElementById("rightGroupTitle").innerText = state.activeRoom;
+    renderGroupsList();
+
+    loadHistory(state.activeRoom);
+    loadGroupMembers(state.activeRoom);
+
+    // Kích hoạt đồng bộ dự phòng mỗi 3 giây (tin nhắn + danh sách nhóm/trạng thái kick)
+    if (state.syncIntervalId) clearInterval(state.syncIntervalId);
+    state.syncIntervalId = setInterval(() => {
         if (state.currentUser && state.activeRoom) {
             syncLatestMessages(state.activeRoom);
+            loadGroups();
         }
     }, 3000);
 }
@@ -155,7 +231,6 @@ function handleIncomingEvent(data) {
     switch (data.type) {
         case "NEW_MSG":
             if (data.groupName === state.activeRoom) {
-                // Nếu là tin nhắn của chính mình đã render thì không render lại
                 const sig = `${data.sender}|${data.content}|${data.timestamp}`;
                 if (data.sender === state.currentUser && state.renderedMessages.has(sig)) {
                     return;
@@ -176,12 +251,43 @@ function handleIncomingEvent(data) {
             break;
         case "USER_LIST":
             state.onlineUsers = data.users || [];
-            renderMembersList();
+            loadGroupMembers(state.activeRoom);
             break;
         case "GROUP_LIST":
-            state.groups = data.groups || [];
-            renderGroupsList();
+            loadGroups();
             break;
+        case "GROUP_MEMBERS_UPDATED":
+            if (data.groupName === state.activeRoom) {
+                loadGroupMembers(state.activeRoom);
+            }
+            loadGroups();
+            break;
+        case "GROUP_KICKED":
+            if (data.targetUser && state.currentUser && data.targetUser.toLowerCase() !== state.currentUser.toLowerCase()) {
+                return;
+            }
+            handleKickedFromGroup(data.groupName);
+            break;
+    }
+}
+
+function handleKickedFromGroup(groupName) {
+    if (!groupName) return;
+    const targetLower = groupName.toLowerCase();
+    const wasActive = (state.activeRoom || "").toLowerCase() === targetLower;
+    const wasInList = state.groups.some(g => g.name.toLowerCase() === targetLower);
+    if (!wasActive && !wasInList) return;
+
+    // Xóa khỏi danh sách nhóm đã mở khóa & danh sách hiển thị ngay lập tức (không popup thông báo)
+    Array.from(state.unlockedGroups).forEach(g => {
+        if (g.toLowerCase() === targetLower) state.unlockedGroups.delete(g);
+    });
+    state.groups = state.groups.filter(g => g.name.toLowerCase() !== targetLower);
+    renderGroupsList();
+
+    // Nếu đang mở nhóm vừa bị kick -> lặng lẽ chuyển về Friends & Family
+    if (wasActive) {
+        selectGroup("Friends & Family");
     }
 }
 
@@ -190,12 +296,25 @@ function handleIncomingEvent(data) {
 // ==========================================================================
 
 async function loadGroups() {
+    if (!state.currentUser) return;
     try {
-        const res = await fetch("/api/groups");
+        const res = await fetch(`/api/groups?user=${encodeURIComponent(state.currentUser || "")}`);
         const data = await res.json();
         if (data.success) {
             state.groups = data.groups || [];
+            const validNames = new Set(["Friends & Family"]);
+            state.groups.forEach(g => {
+                if (g.joined) validNames.add(g.name);
+            });
+            state.unlockedGroups = validNames;
             renderGroupsList();
+
+            if (state.activeRoom && state.activeRoom !== "Friends & Family") {
+                const stillMember = state.groups.some(g => g.name.toLowerCase() === state.activeRoom.toLowerCase());
+                if (!stillMember) {
+                    handleKickedFromGroup(state.activeRoom);
+                }
+            }
         }
     } catch (e) {
         console.error("Lỗi tải danh sách nhóm:", e);
@@ -206,8 +325,10 @@ function renderGroupsList() {
     const container = document.getElementById("groupsContainer");
     container.innerHTML = "";
 
+    let userGroupCount = 0;
     state.groups.forEach(g => {
         if (g.name === "Friends & Family") return;
+        userGroupCount++;
 
         const item = document.createElement("div");
         item.className = `group-item ${state.activeRoom === g.name ? "active" : ""}`;
@@ -218,36 +339,54 @@ function renderGroupsList() {
             <div class="group-icon-circle">${initial}</div>
             <div class="group-meta">
                 <span class="group-name">${escapeHtml(g.name)}</span>
-                <span class="group-desc">${g.memberCount} Members • 🔐 Mã PIN</span>
+                <span class="group-desc">👥 ${g.memberCount} Thành viên • 👑 ${escapeHtml(g.creator || "admin")}</span>
             </div>
         `;
         container.appendChild(item);
     });
+
+    if (userGroupCount === 0) {
+        container.innerHTML = `<div style="font-size:12px;color:#94a3b8;padding:8px 6px;font-style:italic;">Chưa tham gia nhóm nào.<br>Bấm <b>+</b> hoặc <b>Tham Gia Nhóm</b> để nhập mã!</div>`;
+    }
+}
+
+function openJoinGroupByCodeModal() {
+    state.pendingJoinGroup = "";
+    document.getElementById("joinGroupDesc").innerText = "Nhập mã định danh riêng của nhóm để tham gia vào nhóm chat.";
+    document.getElementById("joinGroupInputCode").value = "";
+    openModal("modalJoinGroup");
+    setTimeout(() => document.getElementById("joinGroupInputCode").focus(), 50);
 }
 
 function selectGroup(groupName) {
-    if (!state.unlockedGroups.has(groupName)) {
+    const isUnlocked = groupName === "Friends & Family"
+        || Array.from(state.unlockedGroups).some(g => g.toLowerCase() === (groupName || "").toLowerCase());
+    if (!isUnlocked) {
         state.pendingJoinGroup = groupName;
-        document.getElementById("joinGroupDesc").innerText = `Nhóm [${groupName}] được bảo vệ. Vui lòng nhập mã PIN nhóm để tham gia trò chuyện.`;
+        document.getElementById("joinGroupDesc").innerText = `Nhóm [${groupName}] được bảo vệ. Vui lòng nhập mã định danh nhóm để tham gia.`;
         document.getElementById("joinGroupInputCode").value = "";
         openModal("modalJoinGroup");
         return;
     }
 
     state.activeRoom = groupName;
+    saveSession();
+    closeMobileDrawers();
+    cancelReply();
     document.getElementById("favCard").classList.toggle("active", groupName === "Friends & Family");
     document.getElementById("activeChatTitle").innerText = groupName;
     document.getElementById("rightGroupTitle").innerText = groupName;
 
     state.renderedMessages.clear();
     loadHistory(groupName);
+    loadGroupMembers(groupName);
     renderGroupsList();
 }
 
 async function submitJoinGroup() {
     const code = document.getElementById("joinGroupInputCode").value.trim();
     if (!code) {
-        alert("Vui lòng nhập mã PIN nhóm!");
+        alert("Vui lòng nhập mã định danh của nhóm!");
         return;
     }
 
@@ -256,18 +395,20 @@ async function submitJoinGroup() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                groupName: state.pendingJoinGroup,
+                groupName: state.pendingJoinGroup || "",
                 groupCode: code,
                 username: state.currentUser
             })
         });
         const data = await res.json();
         if (data.success) {
-            state.unlockedGroups.add(state.pendingJoinGroup);
+            const joinedName = data.groupName || state.pendingJoinGroup;
+            state.unlockedGroups.add(joinedName);
             closeModal("modalJoinGroup");
-            selectGroup(state.pendingJoinGroup);
+            await loadGroups();
+            selectGroup(joinedName);
         } else {
-            alert(data.message || "Mã PIN nhóm không chính xác!");
+            alert(data.message || "Mã nhóm không tồn tại hoặc không chính xác!");
         }
     } catch (e) {
         alert("Lỗi khi tham gia nhóm.");
@@ -318,8 +459,12 @@ async function loadHistory(groupName) {
     container.innerHTML = "";
 
     try {
-        const res = await fetch(`/api/history?group=${encodeURIComponent(groupName)}`);
+        const res = await fetch(`/api/history?group=${encodeURIComponent(groupName)}&user=${encodeURIComponent(state.currentUser || "")}`);
         const data = await res.json();
+        if (data.kicked) {
+            handleKickedFromGroup(groupName);
+            return;
+        }
         if (data.success && data.messages) {
             data.messages.forEach(m => {
                 const sig = `${m.sender}|${m.content}|${m.time}`;
@@ -334,8 +479,12 @@ async function loadHistory(groupName) {
 
 async function syncLatestMessages(groupName) {
     try {
-        const res = await fetch(`/api/history?group=${encodeURIComponent(groupName)}`);
+        const res = await fetch(`/api/history?group=${encodeURIComponent(groupName)}&user=${encodeURIComponent(state.currentUser || "")}`);
         const data = await res.json();
+        if (data.kicked) {
+            handleKickedFromGroup(groupName);
+            return;
+        }
         if (data.success && data.messages) {
             data.messages.forEach(m => {
                 const sig = `${m.sender}|${m.content}|${m.time}`;
@@ -348,13 +497,15 @@ async function syncLatestMessages(groupName) {
     } catch (ignored) {}
 }
 
-async function sendActiveMessage() {
-    const input = document.getElementById("txtChatMessage");
-    const content = input.value.trim();
-    if (!content) return;
+async function sendPayloadContent(rawContent) {
+    if (!rawContent || !rawContent.trim()) return;
 
-    input.value = "";
-    input.focus();
+    let finalContent = rawContent.trim();
+    if (state.replyTarget) {
+        const safeSnip = (state.replyTarget.snippet || "").replace(/\]\]/g, ")").replace(/\|/g, "/");
+        finalContent = `[[REPLY|${state.replyTarget.sender}|${safeSnip}]]${finalContent}`;
+        cancelReply();
+    }
 
     try {
         const res = await fetch("/api/send", {
@@ -364,17 +515,16 @@ async function sendActiveMessage() {
                 sender: state.currentUser,
                 role: state.currentRole,
                 groupName: state.activeRoom,
-                content: content,
+                content: finalContent,
                 isPrivate: "false"
             })
         });
         const data = await res.json();
         if (data.success) {
-            // HIỂN THỊ NGAY BONG BÓNG TIN NHẮN CỦA MÌNH TỨC THÌ (0ms)
             const timeStr = data.time || (new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            const sig = `${state.currentUser}|${content}|${timeStr}`;
+            const sig = `${state.currentUser}|${finalContent}|${timeStr}`;
             state.renderedMessages.add(sig);
-            appendMessageBubble(state.currentUser, state.currentRole, timeStr, content, true);
+            appendMessageBubble(state.currentUser, state.currentRole, timeStr, finalContent, true);
         } else {
             alert(data.message || "Không thể gửi tin nhắn.");
         }
@@ -383,10 +533,35 @@ async function sendActiveMessage() {
     }
 }
 
+async function sendActiveMessage() {
+    const input = document.getElementById("txtChatMessage");
+    const content = input.value.trim();
+    if (!content) return;
+
+    input.value = "";
+    input.focus();
+    await sendPayloadContent(content);
+}
+
 function handleInputKeyDown(e) {
     if (e.key === "Enter") {
         sendActiveMessage();
     }
+}
+
+function setReplyTarget(sender, plainSnippet) {
+    const clean = (plainSnippet || "").replace(/\s+/g, " ").trim();
+    state.replyTarget = { sender, snippet: clean };
+    const shortSnip = clean.length > 50 ? clean.substring(0, 50) + "..." : clean;
+    document.getElementById("replyPreviewText").innerHTML = `<b>↩ Đang trả lời @${escapeHtml(sender)}:</b> ${escapeHtml(shortSnip)}`;
+    document.getElementById("replyPreviewBar").style.display = "flex";
+    document.getElementById("txtChatMessage").focus();
+}
+
+function cancelReply() {
+    state.replyTarget = null;
+    const bar = document.getElementById("replyPreviewBar");
+    if (bar) bar.style.display = "none";
 }
 
 function appendMessageBubble(sender, role, time, content, isMine) {
@@ -394,16 +569,54 @@ function appendMessageBubble(sender, role, time, content, isMine) {
     const row = document.createElement("div");
     row.className = `message-row ${isMine ? "mine" : "other"}`;
 
+    let replySender = null;
+    let replySnippet = null;
+    let mainContent = content || "";
+
+    if (mainContent.startsWith("[[REPLY|")) {
+        const endIdx = mainContent.indexOf("]]");
+        if (endIdx > 8) {
+            const meta = mainContent.substring(8, endIdx);
+            const sep = meta.indexOf("|");
+            replySender = sep >= 0 ? meta.substring(0, sep) : meta;
+            replySnippet = sep >= 0 ? meta.substring(sep + 1) : "";
+            mainContent = mainContent.substring(endIdx + 2);
+        }
+    }
+
+    let stickerIcon = null;
+    let stickerLabel = null;
+    if (mainContent.startsWith("[[STICKER|") && mainContent.endsWith("]]")) {
+        const meta = mainContent.substring(10, mainContent.length - 2);
+        const sep = meta.indexOf("|");
+        stickerIcon = sep >= 0 ? meta.substring(0, sep) : meta;
+        stickerLabel = sep >= 0 ? meta.substring(sep + 1) : "Sticker";
+    }
+
+    const plainSnippet = stickerLabel ? `[Sticker] ${stickerLabel}` : mainContent;
     const initial = sender.substring(0, 1).toUpperCase();
+
+    const quoteHtml = replySender
+        ? `<div class="msg-quote-box"><b>↩ @${escapeHtml(replySender)}:</b> ${escapeHtml(replySnippet.length > 48 ? replySnippet.substring(0, 48) + "..." : replySnippet)}</div>`
+        : "";
+
+    const bodyHtml = stickerIcon
+        ? `${quoteHtml}<div class="msg-sticker-card"><span class="msg-sticker-emoji">${escapeHtml(stickerIcon)}</span><span class="msg-sticker-label">${escapeHtml(stickerLabel)}</span></div>`
+        : `<div class="msg-bubble">${quoteHtml}${escapeHtml(mainContent)}</div>`;
+
     row.innerHTML = `
         <div class="msg-avatar" style="${isMine ? 'background:#3b82f6;' : 'background:#94a3b8;'}">${initial}</div>
         <div class="msg-content-wrap">
-            ${!isMine ? `<div class="msg-sender-name">${escapeHtml(sender)} (${role})</div>` : ''}
-            <div class="msg-bubble">${escapeHtml(content)}</div>
-            <div class="msg-meta-row">${time || ''}</div>
+            ${!isMine ? `<div class="msg-sender-name">${escapeHtml(sender)} (${escapeHtml(role)})</div>` : ''}
+            ${bodyHtml}
+            <div class="msg-meta-row">
+                <span>${time || ''}</span>
+                <button type="button" class="reply-btn-inline">↩ Trả lời</button>
+            </div>
         </div>
     `;
 
+    row.querySelector(".reply-btn-inline").onclick = () => setReplyTarget(sender, plainSnippet);
     container.appendChild(row);
     container.scrollTop = container.scrollHeight;
 }
@@ -421,41 +634,236 @@ function appendSystemNotice(text) {
 }
 
 // ==========================================================================
-// 5. DANH SÁCH THÀNH VIÊN ONLINE
+// 5. THÀNH VIÊN NHÓM & ĐẶC QUYỀN TRƯỞNG NHÓM
 // ==========================================================================
 
-function renderMembersList() {
+async function loadGroupMembers(groupName) {
+    if (!state.currentUser || !groupName) return;
+    try {
+        const res = await fetch(`/api/group_members?group=${encodeURIComponent(groupName)}&user=${encodeURIComponent(state.currentUser)}`);
+        const data = await res.json();
+        if (data.success && data.groupName === state.activeRoom) {
+            state.activeGroupInfo = data;
+            renderGroupMembers(data);
+        }
+    } catch (e) {
+        console.error("Lỗi tải thành viên nhóm:", e);
+    }
+}
+
+function renderGroupMembers(info) {
     const container = document.getElementById("membersContainer");
     const label = document.getElementById("membersCountLabel");
     const subtitle = document.getElementById("activeChatSubtitle");
     const favTag = document.getElementById("favOnlineTag");
+    const rightLeader = document.getElementById("rightGroupLeader");
+    const rightCount = document.getElementById("rightGroupCount");
+    const leaderBox = document.getElementById("leaderControls");
+
+    const members = info.members || [];
+    const onlineCount = members.filter(m => m.online).length;
+
+    label.innerText = `Thành viên nhóm (${members.length})`;
+    subtitle.innerText = `👥 ${members.length} Thành viên • 🟢 ${Math.max(1, onlineCount)} Online`;
+    rightLeader.innerText = `👑 Trưởng nhóm: ${info.creator || "admin"}`;
+    rightCount.innerText = `👥 Thành viên: ${members.length}`;
+    if (info.groupName === "Friends & Family") {
+        favTag.innerText = `🟢 ${Math.max(1, onlineCount)} Online`;
+    }
+
+    leaderBox.style.display = info.isLeader ? "block" : "none";
 
     container.innerHTML = "";
-    const count = Math.max(1, state.onlineUsers.length);
-    label.innerText = `Members (${count})`;
-    subtitle.innerText = `🟢 ${count} Online`;
-    favTag.innerText = `🟢 ${count} Online`;
-
-    state.onlineUsers.forEach(u => {
+    members.forEach(m => {
         const item = document.createElement("div");
         item.className = "member-item";
-        const initial = u.username.substring(0, 1).toUpperCase();
-        const isOnline = u.status !== "MUTED";
+        const initial = m.username.substring(0, 1).toUpperCase();
+        const tags = [];
+        if (m.username === state.currentUser) tags.push("(Bạn)");
+        if (m.isLeader) tags.push("👑");
+        if (m.muted) tags.push("🔇");
+
+        let actionsHtml = "";
+        if (info.isLeader && m.username !== state.currentUser) {
+            const muteBtn = m.muted
+                ? `<button type="button" class="btn-mem-act" title="Mở chặn nhắn tin" onclick="leaderGroupAction('UNMUTE','${escapeHtml(m.username)}')">🔊</button>`
+                : `<button type="button" class="btn-mem-act" title="Chặn nhắn tin trong nhóm" onclick="leaderGroupAction('MUTE','${escapeHtml(m.username)}')">🔇</button>`;
+            const kickBtn = info.groupName !== "Friends & Family"
+                ? `<button type="button" class="btn-mem-act kick" title="Kick khỏi nhóm" onclick="leaderGroupAction('KICK','${escapeHtml(m.username)}')">👢</button>`
+                : "";
+            actionsHtml = `<div class="member-actions-inline">${muteBtn}${kickBtn}</div>`;
+        }
 
         item.innerHTML = `
             <div class="member-avatar">${initial}</div>
-            <div class="member-name">${escapeHtml(u.username)} ${u.username === state.currentUser ? "(Bạn)" : ""}</div>
-            <div class="status-dot ${isOnline ? 'online' : 'offline'}"></div>
+            <div class="member-name">${escapeHtml(m.username)} ${tags.join(" ")}</div>
+            ${actionsHtml}
+            <div class="status-dot ${m.online ? 'online' : 'offline'}"></div>
         `;
         container.appendChild(item);
     });
 }
 
+async function leaderGroupAction(action, target = "", extra = "") {
+    try {
+        const res = await fetch("/api/group_action", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                action: action,
+                groupName: state.activeRoom,
+                actor: state.currentUser,
+                target: target,
+                extra: extra
+            })
+        });
+        const data = await res.json();
+        if (!data.success) {
+            alert(data.message || "Không thể thực hiện thao tác.");
+        } else {
+            loadGroupMembers(state.activeRoom);
+            loadGroups();
+        }
+    } catch (e) {
+        alert("Lỗi kết nối khi thực hiện quyền Trưởng nhóm.");
+    }
+}
+
+function leaderChangePin() {
+    const curPin = state.activeGroupInfo && state.activeGroupInfo.groupCode ? state.activeGroupInfo.groupCode : "";
+    const newPin = prompt(`Mã PIN hiện tại của nhóm [${state.activeRoom}]: ${curPin}\nNhập mã PIN mới muốn đổi:`, curPin);
+    if (newPin && newPin.trim()) {
+        leaderGroupAction("SET_CODE", "", newPin.trim());
+    }
+}
+
+function leaderClearHistory() {
+    if (confirm(`Xóa toàn bộ lịch sử tin nhắn trong nhóm [${state.activeRoom}]?`)) {
+        leaderGroupAction("CLEAR_HISTORY").then(() => {
+            state.renderedMessages.clear();
+            document.getElementById("messagesContainer").innerHTML = "";
+        });
+    }
+}
+
+function leaderDeleteGroup() {
+    if (state.activeRoom === "Friends & Family") {
+        alert("Không thể giải tán phòng mặc định.");
+        return;
+    }
+    if (confirm(`Bạn chắc chắn muốn giải tán vĩnh viễn nhóm [${state.activeRoom}]?`)) {
+        leaderGroupAction("DELETE").then(() => {
+            state.unlockedGroups.delete(state.activeRoom);
+            selectGroup("Friends & Family");
+        });
+    }
+}
+
 // ==========================================================================
-// 6. MODALS & UTILITIES
+// 6. EMOJI & STICKER PICKER + MODALS + UTILITIES
 // ==========================================================================
 
+function initEmojiStickerPicker() {
+    const emojis = [
+        "😀", "😂", "🥹", "😍", "🥰", "😎",
+        "🥳", "🤩", "🤔", "😭", "😡", "🤯",
+        "👍", "👎", "👏", "🙏", "🤝", "✌️",
+        "❤️", "💔", "🔥", "⭐", "🎉", "🚀",
+        "💯", "👀", "☕", "🍕", "🎵", "✨"
+    ];
+    const stickers = [
+        { icon: "👋", label: "Xin chào!" },
+        { icon: "😂", label: "Cười xỉu" },
+        { icon: "❤️", label: "Yêu quá!" },
+        { icon: "👍", label: "Quá chuẩn" },
+        { icon: "🔥", label: "Cháy quá" },
+        { icon: "🚀", label: "Chốt đơn!" },
+        { icon: "😢", label: "Buồn ghê" },
+        { icon: "🌙", label: "Ngủ ngon" },
+        { icon: "🙏", label: "Cảm ơn!" },
+        { icon: "⭐", label: "Tuyệt vời" },
+        { icon: "👀", label: "Hóng biến" },
+        { icon: "🎉", label: "Chúc mừng" }
+    ];
+
+    const eGrid = document.getElementById("pickerEmojiGrid");
+    eGrid.innerHTML = "";
+    emojis.forEach(emo => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "emoji-item-btn";
+        b.innerText = emo;
+        b.onclick = () => {
+            const input = document.getElementById("txtChatMessage");
+            input.value += emo;
+            document.getElementById("emojiStickerPicker").style.display = "none";
+            input.focus();
+        };
+        eGrid.appendChild(b);
+    });
+
+    const sGrid = document.getElementById("pickerStickerGrid");
+    sGrid.innerHTML = "";
+    stickers.forEach(st => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "sticker-item-btn";
+        b.innerHTML = `<span>${st.icon}</span><span>${st.label}</span>`;
+        b.onclick = () => {
+            document.getElementById("emojiStickerPicker").style.display = "none";
+            sendPayloadContent(`[[STICKER|${st.icon}|${st.label}]]`);
+        };
+        sGrid.appendChild(b);
+    });
+}
+
+function toggleEmojiPicker() {
+    const p = document.getElementById("emojiStickerPicker");
+    p.style.display = p.style.display === "none" ? "block" : "none";
+}
+
+function switchPickerTab(tab) {
+    const isEmoji = tab === "emoji";
+    document.getElementById("tabBtnEmoji").classList.toggle("active", isEmoji);
+    document.getElementById("tabBtnSticker").classList.toggle("active", !isEmoji);
+    document.getElementById("pickerEmojiGrid").style.display = isEmoji ? "grid" : "none";
+    document.getElementById("pickerStickerGrid").style.display = isEmoji ? "none" : "grid";
+}
+
+function toggleMobileDrawer(side) {
+    const left = document.getElementById("leftSidebar");
+    const right = document.getElementById("rightSidebar");
+    const backdrop = document.getElementById("mobileDrawerBackdrop");
+    if (!left || !right || !backdrop) return;
+
+    if (side === "left") {
+        const opening = !left.classList.contains("open");
+        closeMobileDrawers();
+        if (opening) {
+            left.classList.add("open");
+            backdrop.classList.add("active");
+        }
+    } else if (side === "right") {
+        const opening = !right.classList.contains("open");
+        closeMobileDrawers();
+        if (opening) {
+            right.classList.add("open");
+            backdrop.classList.add("active");
+        }
+    }
+}
+
+function closeMobileDrawers() {
+    const left = document.getElementById("leftSidebar");
+    const right = document.getElementById("rightSidebar");
+    const backdrop = document.getElementById("mobileDrawerBackdrop");
+    if (left) left.classList.remove("open");
+    if (right) right.classList.remove("open");
+    if (backdrop) backdrop.classList.remove("active");
+}
+
 function openModal(id) {
+    closeMobileDrawers();
     document.getElementById(id).style.display = "flex";
 }
 
@@ -478,12 +886,6 @@ function showOptionsMenu() {
     }
 }
 
-function openEmojiPicker() {
-    const input = document.getElementById("txtChatMessage");
-    input.value += "😊";
-    input.focus();
-}
-
 function filterSidebarGroups() {
     const kw = document.getElementById("txtSearchSidebar").value.toLowerCase();
     const items = document.querySelectorAll(".group-item");
@@ -493,10 +895,25 @@ function filterSidebarGroups() {
     });
 }
 
-function doLogout() {
+async function doLogout() {
     if (confirm("Bạn có muốn đăng xuất khỏi Web Chat?")) {
+        const userToLogout = state.currentUser;
+        clearSession();
+        if (state.syncIntervalId) {
+            clearInterval(state.syncIntervalId);
+            state.syncIntervalId = null;
+        }
         if (state.eventSource) {
             try { state.eventSource.close(); } catch (e) {}
+        }
+        if (userToLogout) {
+            try {
+                await fetch("/api/logout", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ username: userToLogout })
+                });
+            } catch (ignored) {}
         }
         location.reload();
     }

@@ -47,7 +47,7 @@ public class MessageDAO {
     public List<MessagePacket> getGroupMessages(String groupName, int limit) {
         List<MessagePacket> list = new ArrayList<>();
         String sql = "SELECT id, group_name, type, sender, sender_role, receiver, content, timestamp "
-                + "FROM messages WHERE group_name = ? AND type = 'PUBLIC' "
+                + "FROM messages WHERE group_name = ? AND type = 'PUBLIC' AND content != '[JOIN_NOTIFY]' "
                 + "ORDER BY id DESC LIMIT ?";
 
         try (Connection conn = DatabaseConnection.getConnection();
@@ -74,6 +74,18 @@ public class MessageDAO {
 
         Collections.reverse(list);
         return list;
+    }
+
+    public boolean clearGroupHistory(String groupName) {
+        String sql = "DELETE FROM messages WHERE group_name = ?";
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, groupName);
+            ps.executeUpdate();
+            return true;
+        } catch (SQLException e) {
+            return false;
+        }
     }
 
     public boolean clearHistory() {

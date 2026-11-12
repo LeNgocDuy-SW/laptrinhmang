@@ -121,6 +121,7 @@ public class ChatServer {
             threadPool.shutdownNow();
         }
 
+        DatabaseConnection.checkpoint();
         log("[SERVER] Máy chủ đã dừng hoạt động.");
     }
 

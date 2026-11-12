@@ -39,7 +39,6 @@ public class LoginFrame extends JFrame implements ChatEventListener {
     // Các trường nhập liệu
     private JTextField txtUser;
     private JPasswordField txtPass;
-    private JComboBox<String> cbRole;
     private JLabel lblTitle;
     private JLabel lblSub;
     private JButton btnMainAction;
@@ -248,14 +247,6 @@ public class LoginFrame extends JFrame implements ChatEventListener {
         });
         passFieldWrapper.add(btnToggleEye, BorderLayout.EAST);
         cardPanel.add(passFieldWrapper);
-
-        // 4b. Hàng chọn Vai trò (Chỉ hiển thị khi ở chế độ Đăng Ký)
-        cbRole = new JComboBox<>(new String[]{Protocol.ROLE_USER + " (Người Dùng)", Protocol.ROLE_ADMIN + " (Quản Trị Viên)"});
-        cbRole.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-        cbRole.setMaximumSize(new Dimension(340, 36));
-        cbRole.setAlignmentX(Component.CENTER_ALIGNMENT);
-        cbRole.setVisible(false);
-        cardPanel.add(cbRole);
 
         cardPanel.add(Box.createVerticalStrut(12));
 
@@ -558,13 +549,11 @@ public class LoginFrame extends JFrame implements ChatEventListener {
             lblTitle.setText("Create Account");
             lblSub.setText("Sign up to get started");
             btnMainAction.setText("Sign Up");
-            cbRole.setVisible(true);
             lblToggleMode.setText("<html>Already have an account? <font color='#2575FC'><b>Sign in</b></font></html>");
         } else {
             lblTitle.setText("Welcome Back");
             lblSub.setText("Sign in to continue");
             btnMainAction.setText("Login");
-            cbRole.setVisible(false);
             lblToggleMode.setText("<html>Don't have an account? <font color='#2575FC'><b>Sign up</b></font></html>");
         }
         revalidate();
@@ -658,8 +647,7 @@ public class LoginFrame extends JFrame implements ChatEventListener {
             }
 
             if (isRegisterMode) {
-                String role = cbRole.getSelectedIndex() == 1 ? Protocol.ROLE_ADMIN : Protocol.ROLE_USER;
-                socketClient.register(username, password, role);
+                socketClient.register(username, password, Protocol.ROLE_USER);
             } else {
                 socketClient.login(username, password);
             }

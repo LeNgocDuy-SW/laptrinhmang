@@ -73,6 +73,9 @@ public class ServerListener extends Thread {
             case Protocol.RES_GROUP_LIST:
                 handleGroupList(payload);
                 break;
+            case Protocol.RES_MY_GROUPS:
+                handleMyGroups(payload);
+                break;
             case Protocol.RES_NEW_MSG:
                 handleNewMsg(payload);
                 break;
@@ -87,6 +90,12 @@ public class ServerListener extends Thread {
                 break;
             case Protocol.RES_HISTORY:
                 handleHistory(payload);
+                break;
+            case Protocol.RES_GROUP_MEMBERS:
+                handleGroupMembers(payload);
+                break;
+            case Protocol.NOTIFY_GROUP_KICKED:
+                handleGroupKicked(payload);
                 break;
             case Protocol.NOTIFY_KICKED:
                 dispatch(() -> listener.onKicked(payload));
@@ -147,10 +156,49 @@ public class ServerListener extends Thread {
                 String[] tokens = it.split(":");
                 String gName = tokens[0];
                 int count = tokens.length > 1 ? Integer.parseInt(tokens[1]) : 1;
-                list.add(new ChatGroup(0, gName, "", "", "", count));
+                String creator = tokens.length > 2 ? tokens[2] : "";
+                list.add(new ChatGroup(0, gName, "", creator, "", count));
             }
         }
         dispatch(() -> listener.onGroupListUpdated(list));
+    }
+
+    private void handleGroupMembers(String payload) {
+        String[] parts = payload.split(Protocol.DELIMITER_REGEX, 3);
+        if (parts.length < 3) return;
+        String groupName = parts[0];
+        String creator = parts[1];
+        List<String[]> members = new ArrayList<>();
+        if (!parts[2].isEmpty()) {
+            for (String token : parts[2].split(",")) {
+                String[] fields = token.split(":");
+                if (fields.length >= 1 && !fields[0].isEmpty()) {
+                    String uname = fields[0];
+                    String online = fields.length > 1 ? fields[1] : "0";
+                    String muted = fields.length > 2 ? fields[2] : "0";
+                    members.add(new String[]{uname, online, muted});
+                }
+            }
+        }
+        dispatch(() -> listener.onGroupMembersUpdated(groupName, creator, members));
+    }
+
+    private void handleGroupKicked(String payload) {
+        String[] parts = payload.split(Protocol.DELIMITER_REGEX, 2);
+        String gName = parts.length > 0 ? parts[0] : "";
+        String reason = parts.length > 1 ? parts[1] : "Bạn đã bị mời khỏi nhóm.";
+        dispatch(() -> listener.onGroupKicked(gName, reason));
+    }
+
+    private void handleMyGroups(String payload) {
+        List<String> list = new ArrayList<>();
+        if (!payload.isEmpty()) {
+            for (String g : payload.split(",")) {
+                String name = g.trim();
+                if (!name.isEmpty()) list.add(name);
+            }
+        }
+        dispatch(() -> listener.onMyGroupsReceived(list));
     }
 
     private void handleNewMsg(String payload) {

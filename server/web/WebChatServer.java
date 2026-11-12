@@ -22,6 +22,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
@@ -39,6 +40,7 @@ public class WebChatServer implements RoomManager.WebEventListener {
     private final GroupDAO groupDAO;
 
     private HttpServer server;
+    private ExecutorService sseExecutor;
     private volatile boolean running = false;
 
     // Quản lý các luồng SSE đang kết nối theo từng username
@@ -59,15 +61,20 @@ public class WebChatServer implements RoomManager.WebEventListener {
         if (running) return true;
 
         try {
+            sseExecutor = Executors.newCachedThreadPool();
             server = HttpServer.create(new InetSocketAddress(webPort), 0);
             server.setExecutor(Executors.newCachedThreadPool());
 
             // 1. Phục vụ các API JSON
             server.createContext("/api/login", new LoginHandler());
+            server.createContext("/api/session", new SessionHandler());
+            server.createContext("/api/logout", new LogoutHandler());
             server.createContext("/api/register", new RegisterHandler());
             server.createContext("/api/groups", new GroupsHandler());
             server.createContext("/api/create_group", new CreateGroupHandler());
             server.createContext("/api/join_group", new JoinGroupHandler());
+            server.createContext("/api/group_members", new GroupMembersHandler());
+            server.createContext("/api/group_action", new GroupActionHandler());
             server.createContext("/api/send", new SendHandler());
             server.createContext("/api/history", new HistoryHandler());
             server.createContext("/api/users", new UsersHandler());
@@ -101,6 +108,9 @@ public class WebChatServer implements RoomManager.WebEventListener {
 
         if (server != null) {
             server.stop(1);
+        }
+        if (sseExecutor != null && !sseExecutor.isShutdown()) {
+            sseExecutor.shutdownNow();
         }
         roomManager.log("[WEB SERVER] Đã dừng máy chủ Web.");
     }
@@ -136,7 +146,27 @@ public class WebChatServer implements RoomManager.WebEventListener {
             broadcastSse(json);
         } else if (Protocol.RES_GROUP_LIST.equals(header)) {
             onGroupListUpdated(groupDAO.getAllGroups());
+        } else if (Protocol.NOTIFY_GROUP_KICKED.equals(header)) {
+            String gName = parts.length > 1 ? parts[1] : "";
+            String reason = parts.length > 2 ? parts[2] : "Nhóm đã bị xóa.";
+            String json = String.format("{\"type\":\"GROUP_KICKED\",\"groupName\":\"%s\",\"reason\":\"%s\"}",
+                    escapeJson(gName), escapeJson(reason));
+            broadcastSse(json);
         }
+    }
+
+    @Override
+    public void onGroupKicked(String targetUser, String groupName, String reason) {
+        String json = String.format("{\"type\":\"GROUP_KICKED\",\"targetUser\":\"%s\",\"groupName\":\"%s\",\"reason\":\"%s\"}",
+                escapeJson(targetUser), escapeJson(groupName), escapeJson(reason));
+        broadcastSse(json);
+    }
+
+    @Override
+    public void onGroupMembersUpdated(String groupName) {
+        String json = String.format("{\"type\":\"GROUP_MEMBERS_UPDATED\",\"groupName\":\"%s\"}",
+                escapeJson(groupName));
+        broadcastSse(json);
     }
 
     @Override
@@ -187,34 +217,50 @@ public class WebChatServer implements RoomManager.WebEventListener {
     // =========================================================================
 
     private void broadcastSse(String json) {
+        if (sseExecutor == null || sseExecutor.isShutdown()) return;
         byte[] payload = ("data: " + json + "\n\n").getBytes(StandardCharsets.UTF_8);
         for (Map.Entry<String, CopyOnWriteArrayList<OutputStream>> entry : sseStreams.entrySet()) {
-            for (OutputStream os : entry.getValue()) {
+            CopyOnWriteArrayList<OutputStream> list = entry.getValue();
+            for (OutputStream os : list) {
+                sseExecutor.execute(() -> {
+                    try {
+                        synchronized (os) {
+                            os.write(payload);
+                            os.flush();
+                        }
+                    } catch (IOException e) {
+                        list.remove(os);
+                    }
+                });
+            }
+        }
+    }
+
+    private void sendSseToUser(String username, String json) {
+        if (sseExecutor == null || sseExecutor.isShutdown() || username == null) return;
+        CopyOnWriteArrayList<OutputStream> list = sseStreams.get(username);
+        if (list == null) {
+            for (Map.Entry<String, CopyOnWriteArrayList<OutputStream>> entry : sseStreams.entrySet()) {
+                if (entry.getKey().equalsIgnoreCase(username)) {
+                    list = entry.getValue();
+                    break;
+                }
+            }
+        }
+        if (list == null) return;
+        final CopyOnWriteArrayList<OutputStream> targetList = list;
+        byte[] payload = ("data: " + json + "\n\n").getBytes(StandardCharsets.UTF_8);
+        for (OutputStream os : targetList) {
+            sseExecutor.execute(() -> {
                 try {
                     synchronized (os) {
                         os.write(payload);
                         os.flush();
                     }
                 } catch (IOException e) {
-                    entry.getValue().remove(os);
+                    targetList.remove(os);
                 }
-            }
-        }
-    }
-
-    private void sendSseToUser(String username, String json) {
-        CopyOnWriteArrayList<OutputStream> list = sseStreams.get(username);
-        if (list == null) return;
-        byte[] payload = ("data: " + json + "\n\n").getBytes(StandardCharsets.UTF_8);
-        for (OutputStream os : list) {
-            try {
-                synchronized (os) {
-                    os.write(payload);
-                    os.flush();
-                }
-            } catch (IOException e) {
-                list.remove(os);
-            }
+            });
         }
     }
 
@@ -238,6 +284,11 @@ public class WebChatServer implements RoomManager.WebEventListener {
                 return;
             }
             user = user.trim();
+            User dbUser = userDAO.findByUsername(user);
+            if (dbUser != null && !dbUser.isBanned()) {
+                user = dbUser.getUsername();
+                roomManager.addWebClient(dbUser.getUsername(), dbUser.getRole());
+            }
 
             exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=UTF-8");
             exchange.getResponseHeaders().set("Cache-Control", "no-cache");
@@ -322,6 +373,50 @@ public class WebChatServer implements RoomManager.WebEventListener {
         }
     }
 
+    private class SessionHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            setCors(exchange);
+            if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+                exchange.sendResponseHeaders(204, -1);
+                return;
+            }
+            Map<String, String> query = parseQuery(exchange.getRequestURI().getQuery());
+            String user = query.getOrDefault("user", "").trim();
+            if (user.isEmpty()) {
+                sendJsonResponse(exchange, 401, "{\"success\":false,\"message\":\"Chưa có phiên đăng nhập\"}");
+                return;
+            }
+
+            User dbUser = userDAO.findByUsername(user);
+            if (dbUser == null || dbUser.isBanned()) {
+                sendJsonResponse(exchange, 401, "{\"success\":false,\"message\":\"Tài khoản không hợp lệ hoặc đã bị khóa\"}");
+                return;
+            }
+
+            roomManager.addWebClient(dbUser.getUsername(), dbUser.getRole());
+            sendJsonResponse(exchange, 200, String.format("{\"success\":true,\"username\":\"%s\",\"role\":\"%s\"}",
+                    escapeJson(dbUser.getUsername()), escapeJson(dbUser.getRole())));
+        }
+    }
+
+    private class LogoutHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            setCors(exchange);
+            if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+                exchange.sendResponseHeaders(204, -1);
+                return;
+            }
+            Map<String, String> body = parseJsonOrForm(readBody(exchange));
+            String user = body.getOrDefault("username", "").trim();
+            if (!user.isEmpty()) {
+                roomManager.removeWebClient(user);
+            }
+            sendJsonResponse(exchange, 200, "{\"success\":true}");
+        }
+    }
+
     private class RegisterHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
@@ -338,14 +433,14 @@ public class WebChatServer implements RoomManager.WebEventListener {
             Map<String, String> body = parseJsonOrForm(readBody(exchange));
             String user = body.getOrDefault("username", "").trim();
             String pass = body.getOrDefault("password", "").trim();
-            String role = body.getOrDefault("role", Protocol.ROLE_USER).trim();
 
             if (user.isEmpty() || pass.isEmpty()) {
                 sendJsonResponse(exchange, 400, "{\"success\":false,\"message\":\"Vui lòng điền đầy đủ thông tin.\"}");
                 return;
             }
 
-            boolean ok = userDAO.register(user, pass, role);
+            // Mặc định tài khoản đăng ký mới luôn là USER
+            boolean ok = userDAO.register(user, pass, Protocol.ROLE_USER);
             if (ok) {
                 sendJsonResponse(exchange, 200, "{\"success\":true,\"message\":\"Đăng ký tài khoản thành công!\"}");
             } else {
@@ -358,12 +453,15 @@ public class WebChatServer implements RoomManager.WebEventListener {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             setCors(exchange);
-            List<ChatGroup> list = groupDAO.getAllGroups();
+            Map<String, String> query = parseQuery(exchange.getRequestURI().getQuery());
+            String user = query.getOrDefault("user", "").trim();
+
+            List<ChatGroup> list = user.isEmpty() ? Collections.emptyList() : groupDAO.getUserGroups(user);
             StringBuilder sb = new StringBuilder("{\"success\":true,\"groups\":[");
             for (int i = 0; i < list.size(); i++) {
                 ChatGroup g = list.get(i);
                 if (i > 0) sb.append(",");
-                sb.append(String.format("{\"name\":\"%s\",\"creator\":\"%s\",\"memberCount\":%d}",
+                sb.append(String.format("{\"name\":\"%s\",\"creator\":\"%s\",\"memberCount\":%d,\"joined\":true}",
                         escapeJson(g.getGroupName()), escapeJson(g.getCreator()), g.getMemberCount()));
             }
             sb.append("]}");
@@ -375,6 +473,10 @@ public class WebChatServer implements RoomManager.WebEventListener {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             setCors(exchange);
+            if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+                exchange.sendResponseHeaders(204, -1);
+                return;
+            }
             if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
                 sendJsonResponse(exchange, 405, "{\"error\":\"Method not allowed\"}");
                 return;
@@ -386,7 +488,7 @@ public class WebChatServer implements RoomManager.WebEventListener {
             String creator = body.getOrDefault("creator", "web_user").trim();
 
             if (groupName.isEmpty() || groupCode.isEmpty()) {
-                sendJsonResponse(exchange, 400, "{\"success\":false,\"message\":\"Tên nhóm và mã PIN không được để trống.\"}");
+                sendJsonResponse(exchange, 400, "{\"success\":false,\"message\":\"Tên nhóm và mã nhóm không được để trống.\"}");
                 return;
             }
 
@@ -397,7 +499,7 @@ public class WebChatServer implements RoomManager.WebEventListener {
                 sendJsonResponse(exchange, 200, String.format("{\"success\":true,\"groupName\":\"%s\",\"groupCode\":\"%s\"}",
                         escapeJson(groupName), escapeJson(groupCode)));
             } else {
-                sendJsonResponse(exchange, 400, "{\"success\":false,\"message\":\"Tên nhóm đã tồn tại!\"}");
+                sendJsonResponse(exchange, 400, "{\"success\":false,\"message\":\"Tên nhóm hoặc mã nhóm [" + escapeJson(groupCode) + "] đã được sử dụng!\"}");
             }
         }
     }
@@ -406,6 +508,10 @@ public class WebChatServer implements RoomManager.WebEventListener {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             setCors(exchange);
+            if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+                exchange.sendResponseHeaders(204, -1);
+                return;
+            }
             if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
                 sendJsonResponse(exchange, 405, "{\"error\":\"Method not allowed\"}");
                 return;
@@ -416,13 +522,161 @@ public class WebChatServer implements RoomManager.WebEventListener {
             String groupCode = body.getOrDefault("groupCode", "").trim();
             String username = body.getOrDefault("username", "").trim();
 
-            boolean valid = groupDAO.verifyGroupCode(groupName, groupCode);
+            if (groupCode.isEmpty()) {
+                sendJsonResponse(exchange, 400, "{\"success\":false,\"message\":\"Vui lòng nhập mã định danh của nhóm!\"}");
+                return;
+            }
+
+            boolean valid;
+            if (groupName.isEmpty()) {
+                groupName = groupDAO.findGroupByCode(groupCode);
+                valid = (groupName != null);
+            } else {
+                valid = groupDAO.verifyGroupCode(groupName, groupCode);
+            }
+
             if (valid) {
                 groupDAO.addMember(groupName, username);
                 roomManager.broadcastGroupList();
+                roomManager.notifyGroupMembersUpdated(groupName);
                 sendJsonResponse(exchange, 200, String.format("{\"success\":true,\"groupName\":\"%s\"}", escapeJson(groupName)));
             } else {
-                sendJsonResponse(exchange, 400, "{\"success\":false,\"message\":\"Mã bảo vệ nhóm không chính xác!\"}");
+                sendJsonResponse(exchange, 400, "{\"success\":false,\"message\":\"Mã nhóm không tồn tại hoặc không chính xác!\"}");
+            }
+        }
+    }
+
+    private class GroupMembersHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            setCors(exchange);
+            Map<String, String> query = parseQuery(exchange.getRequestURI().getQuery());
+            String groupName = query.getOrDefault("group", Protocol.DEFAULT_GROUP).trim();
+            String currentUser = query.getOrDefault("user", "").trim();
+
+            String creator = groupDAO.getGroupCreator(groupName);
+            boolean isGlobalAdmin = false;
+            if (!currentUser.isEmpty()) {
+                User u = userDAO.findByUsername(currentUser);
+                isGlobalAdmin = u != null && Protocol.ROLE_ADMIN.equalsIgnoreCase(u.getRole());
+            }
+            boolean isLeader = (!currentUser.isEmpty() && groupDAO.isGroupLeader(groupName, currentUser)) || isGlobalAdmin;
+
+            List<String> members = groupDAO.getGroupMembers(groupName);
+            if (Protocol.DEFAULT_GROUP.equalsIgnoreCase(groupName)) {
+                for (User u : roomManager.getOnlineUsersList()) {
+                    if (!members.contains(u.getUsername())) members.add(u.getUsername());
+                }
+            }
+
+            String groupCode = isLeader ? groupDAO.getGroupCode(groupName) : "";
+            StringBuilder sb = new StringBuilder();
+            sb.append("{\"success\":true,")
+              .append("\"groupName\":\"").append(escapeJson(groupName)).append("\",")
+              .append("\"creator\":\"").append(escapeJson(creator)).append("\",")
+              .append("\"isLeader\":").append(isLeader).append(",")
+              .append("\"groupCode\":\"").append(escapeJson(groupCode)).append("\",")
+              .append("\"memberCount\":").append(members.size()).append(",")
+              .append("\"members\":[");
+
+            for (int i = 0; i < members.size(); i++) {
+                String m = members.get(i);
+                boolean online = roomManager.isUserOnline(m);
+                boolean muted = groupDAO.isMutedInGroup(groupName, m) || roomManager.isUserMuted(m);
+                boolean leader = m.equalsIgnoreCase(creator);
+                if (i > 0) sb.append(",");
+                sb.append(String.format("{\"username\":\"%s\",\"online\":%s,\"muted\":%s,\"isLeader\":%s}",
+                        escapeJson(m), online, muted, leader));
+            }
+            sb.append("]}");
+            sendJsonResponse(exchange, 200, sb.toString());
+        }
+    }
+
+    private class GroupActionHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            setCors(exchange);
+            if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+                exchange.sendResponseHeaders(204, -1);
+                return;
+            }
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendJsonResponse(exchange, 405, "{\"error\":\"Method not allowed\"}");
+                return;
+            }
+
+            Map<String, String> body = parseJsonOrForm(readBody(exchange));
+            String action = body.getOrDefault("action", "").trim().toUpperCase();
+            String groupName = body.getOrDefault("groupName", "").trim();
+            String actor = body.getOrDefault("actor", "").trim();
+            String target = body.getOrDefault("target", "").trim();
+            String extra = body.getOrDefault("extra", "").trim();
+
+            User uActor = userDAO.findByUsername(actor);
+            boolean isGlobalAdmin = uActor != null && Protocol.ROLE_ADMIN.equalsIgnoreCase(uActor.getRole());
+            boolean isLeader = groupDAO.isGroupLeader(groupName, actor) || isGlobalAdmin;
+            if (!isLeader) {
+                sendJsonResponse(exchange, 403, "{\"success\":false,\"message\":\"Chỉ Trưởng nhóm mới có quyền thực hiện thao tác này!\"}");
+                return;
+            }
+
+            switch (action) {
+                case Protocol.GACT_KICK:
+                    if (target.isEmpty() || target.equalsIgnoreCase(actor)) {
+                        sendJsonResponse(exchange, 400, "{\"success\":false,\"message\":\"Không thể tự kick chính mình.\"}");
+                        return;
+                    }
+                    groupDAO.removeMember(groupName, target);
+                    roomManager.notifyGroupKicked(target, groupName, "Bạn đã bị Trưởng nhóm [" + actor + "] mời khỏi nhóm [" + groupName + "].");
+                    roomManager.broadcastGroupList();
+                    roomManager.notifyGroupMembersUpdated(groupName);
+                    sendJsonResponse(exchange, 200, "{\"success\":true}");
+                    return;
+                case Protocol.GACT_MUTE:
+                    if (target.isEmpty() || target.equalsIgnoreCase(actor)) {
+                        sendJsonResponse(exchange, 400, "{\"success\":false,\"message\":\"Không thể chặn chính mình.\"}");
+                        return;
+                    }
+                    groupDAO.muteInGroup(groupName, target, actor);
+                    roomManager.notifyGroupMembersUpdated(groupName);
+                    roomManager.broadcast(Protocol.RES_SYSTEM_MSG + Protocol.DELIMITER + "🔇 Trưởng nhóm " + actor + " đã chặn @" + target + " nhắn tin trong nhóm [" + groupName + "].");
+                    sendJsonResponse(exchange, 200, "{\"success\":true}");
+                    return;
+                case Protocol.GACT_UNMUTE:
+                    groupDAO.unmuteInGroup(groupName, target);
+                    roomManager.notifyGroupMembersUpdated(groupName);
+                    roomManager.broadcast(Protocol.RES_SYSTEM_MSG + Protocol.DELIMITER + "🔊 Trưởng nhóm " + actor + " đã mở chặn chat cho @" + target + " trong nhóm [" + groupName + "].");
+                    sendJsonResponse(exchange, 200, "{\"success\":true}");
+                    return;
+                case Protocol.GACT_SET_CODE:
+                    if (extra.isEmpty() || !groupDAO.updateGroupCode(groupName, extra)) {
+                        sendJsonResponse(exchange, 400, "{\"success\":false,\"message\":\"Mã PIN mới không hợp lệ.\"}");
+                        return;
+                    }
+                    sendJsonResponse(exchange, 200, "{\"success\":true,\"message\":\"Đã đổi mã PIN thành công!\"}");
+                    return;
+                case Protocol.GACT_CLEAR_HISTORY:
+                    messageDAO.clearGroupHistory(groupName);
+                    roomManager.broadcast(Protocol.RES_SYSTEM_MSG + Protocol.DELIMITER + "🧹 Trưởng nhóm " + actor + " đã xóa lịch sử nhóm [" + groupName + "].");
+                    sendJsonResponse(exchange, 200, "{\"success\":true}");
+                    return;
+                case Protocol.GACT_DELETE:
+                    if (Protocol.DEFAULT_GROUP.equalsIgnoreCase(groupName)) {
+                        sendJsonResponse(exchange, 400, "{\"success\":false,\"message\":\"Không thể xóa phòng mặc định.\"}");
+                        return;
+                    }
+                    if (groupDAO.deleteGroup(groupName)) {
+                        roomManager.broadcast(Protocol.NOTIFY_GROUP_KICKED + Protocol.DELIMITER + groupName + Protocol.DELIMITER + "Nhóm [" + groupName + "] đã bị Trưởng nhóm giải tán.");
+                        roomManager.broadcastGroupList();
+                        roomManager.broadcast(Protocol.RES_SYSTEM_MSG + Protocol.DELIMITER + "🗑️ Nhóm [" + groupName + "] đã bị Trưởng nhóm " + actor + " giải tán.");
+                        sendJsonResponse(exchange, 200, "{\"success\":true}");
+                    } else {
+                        sendJsonResponse(exchange, 400, "{\"success\":false,\"message\":\"Không thể xóa nhóm.\"}");
+                    }
+                    return;
+                default:
+                    sendJsonResponse(exchange, 400, "{\"success\":false,\"message\":\"Hành động không hợp lệ.\"}");
             }
         }
     }
@@ -458,8 +712,21 @@ public class WebChatServer implements RoomManager.WebEventListener {
                 return;
             }
 
-            String time = LocalDateTime.now().format(TIME_FMT);
             boolean isPrivate = "true".equalsIgnoreCase(isPrivateStr);
+            if (!isPrivate) {
+                if (!Protocol.DEFAULT_GROUP.equalsIgnoreCase(groupName)
+                        && !groupDAO.isMember(groupName, sender)
+                        && !groupDAO.isGroupLeader(groupName, sender)) {
+                    sendJsonResponse(exchange, 403, "{\"success\":false,\"message\":\"Bạn không còn là thành viên của nhóm này!\"}");
+                    return;
+                }
+                if (groupDAO.isMutedInGroup(groupName, sender)) {
+                    sendJsonResponse(exchange, 403, "{\"success\":false,\"message\":\"🔇 Bạn đã bị Trưởng nhóm chặn gửi tin trong nhóm này!\"}");
+                    return;
+                }
+            }
+
+            String time = LocalDateTime.now().format(TIME_FMT);
 
             if (isPrivate) {
                 MessagePacket msg = new MessagePacket(MessagePacket.TYPE_PRIVATE, sender, role, targetUser, content);
@@ -492,6 +759,14 @@ public class WebChatServer implements RoomManager.WebEventListener {
             setCors(exchange);
             Map<String, String> query = parseQuery(exchange.getRequestURI().getQuery());
             String group = query.getOrDefault("group", "Friends & Family").trim();
+            String user = query.getOrDefault("user", "").trim();
+
+            if (!user.isEmpty() && !Protocol.DEFAULT_GROUP.equalsIgnoreCase(group)) {
+                if (!groupDAO.isMember(group, user) && !groupDAO.isGroupLeader(group, user)) {
+                    sendJsonResponse(exchange, 403, "{\"success\":false,\"kicked\":true,\"message\":\"Bạn không còn là thành viên của nhóm này!\"}");
+                    return;
+                }
+            }
 
             List<MessagePacket> list = messageDAO.getGroupMessages(group, 50);
             StringBuilder sb = new StringBuilder("{\"success\":true,\"messages\":[");
@@ -523,12 +798,18 @@ public class WebChatServer implements RoomManager.WebEventListener {
         }
     }
 
-    private static class StaticFileHandler implements HttpHandler {
+    private class StaticFileHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             String path = exchange.getRequestURI().getPath();
             if (path == null || path.equals("/") || path.isEmpty()) {
                 path = "/index.html";
+            }
+
+            if ("/index.html".equals(path)) {
+                String forwarded = exchange.getRequestHeaders().getFirst("CF-Connecting-IP");
+                String clientIp = forwarded != null ? forwarded : String.valueOf(exchange.getRemoteAddress());
+                roomManager.log("[WEB] Trình duyệt từ " + clientIp + " đang mở trang Web Chat.");
             }
 
             File file = new File("web" + path);

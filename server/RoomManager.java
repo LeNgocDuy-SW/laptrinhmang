@@ -24,6 +24,8 @@ public class RoomManager {
         boolean onWebPrivate(String sender, String receiver, String packet, String echoPacket);
         void onUserListUpdated(List<User> users);
         void onGroupListUpdated(List<ChatGroup> groups);
+        default void onGroupKicked(String targetUser, String groupName, String reason) {}
+        default void onGroupMembersUpdated(String groupName) {}
     }
 
     private ServerEventListener listener;
@@ -207,19 +209,60 @@ public class RoomManager {
      * Gửi danh sách cập nhật các nhóm cho toàn bộ Client
      */
     public void broadcastGroupList() {
-        List<ChatGroup> list = groupDAO.getAllGroups();
-        StringBuilder sb = new StringBuilder(Protocol.RES_GROUP_LIST).append(Protocol.DELIMITER);
+        for (ClientHandler handler : onlineClients.values()) {
+            handler.sendGroupList();
+        }
+        if (webListener != null) {
+            webListener.onGroupListUpdated(groupDAO.getAllGroups());
+        }
+    }
+
+    public void notifyGroupKicked(String targetUser, String groupName, String reason) {
+        ClientHandler target = onlineClients.get(targetUser);
+        if (target == null && targetUser != null) {
+            for (Map.Entry<String, ClientHandler> entry : onlineClients.entrySet()) {
+                if (entry.getKey().equalsIgnoreCase(targetUser)) {
+                    target = entry.getValue();
+                    break;
+                }
+            }
+        }
+        if (target != null) {
+            target.sendPacket(Protocol.NOTIFY_GROUP_KICKED + Protocol.DELIMITER + groupName + Protocol.DELIMITER + reason);
+        }
+        if (webListener != null) {
+            webListener.onGroupKicked(targetUser, groupName, reason);
+        }
+    }
+
+    public void notifyGroupMembersUpdated(String groupName) {
+        String packet = buildGroupMembersPacket(groupName);
+        broadcast(packet);
+        if (webListener != null) {
+            webListener.onGroupMembersUpdated(groupName);
+        }
+    }
+
+    public String buildGroupMembersPacket(String groupName) {
+        String creator = groupDAO.getGroupCreator(groupName);
+        List<String> members = groupDAO.getGroupMembers(groupName);
+        if ("Friends & Family".equalsIgnoreCase(groupName)) {
+            for (User u : getOnlineUsersList()) {
+                if (!members.contains(u.getUsername())) members.add(u.getUsername());
+            }
+        }
+        StringBuilder sb = new StringBuilder(Protocol.RES_GROUP_MEMBERS).append(Protocol.DELIMITER)
+                .append(groupName).append(Protocol.DELIMITER)
+                .append(creator).append(Protocol.DELIMITER);
         boolean first = true;
-        for (ChatGroup g : list) {
+        for (String m : members) {
             if (!first) sb.append(",");
-            sb.append(g.getGroupName()).append(":").append(g.getMemberCount());
+            boolean online = isUserOnline(m);
+            boolean muted = groupDAO.isMutedInGroup(groupName, m) || isUserMuted(m);
+            sb.append(m).append(":").append(online ? "1" : "0").append(":").append(muted ? "1" : "0");
             first = false;
         }
-        broadcast(sb.toString());
-
-        if (webListener != null) {
-            webListener.onGroupListUpdated(list);
-        }
+        return sb.toString();
     }
 
     public boolean kickUser(String targetUser, String reason) {

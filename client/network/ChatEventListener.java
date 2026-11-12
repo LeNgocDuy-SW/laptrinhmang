@@ -16,6 +16,9 @@ public interface ChatEventListener {
     void onCreateGroupResult(boolean success, String groupName, String groupCode, String message);
     void onJoinGroupResult(boolean success, String groupName, String message);
     void onGroupListUpdated(List<ChatGroup> groups);
+    default void onMyGroupsReceived(List<String> joinedGroups) {}
+    default void onGroupMembersUpdated(String groupName, String creator, List<String[]> members) {}
+    default void onGroupKicked(String groupName, String reason) {}
 
     // Sự kiện Tin Nhắn
     void onPublicMessageReceived(String sender, String role, String timestamp, String content);

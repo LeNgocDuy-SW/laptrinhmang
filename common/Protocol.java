@@ -26,6 +26,7 @@ public class Protocol {
     public static final String CMD_GET_GROUPS = "GET_GROUPS";       // C -> S: GET_GROUPS
     public static final String CMD_GET_ROOMS = CMD_GET_GROUPS;      // Alias
     public static final String RES_GROUP_LIST = "GROUP_LIST";       // S -> C: GROUP_LIST|g1:count,g2:count,...
+    public static final String RES_MY_GROUPS = "MY_GROUPS";         // S -> C: MY_GROUPS|g1,g2,... (Các nhóm user đã tham gia)
 
     // --- Tin nhắn (Chat) ---
     public static final String CMD_MSG_ALL = "MSG_ALL";             // C -> S: MSG_ALL|nội_dung (Phòng mặc định)
@@ -34,6 +35,7 @@ public class Protocol {
     public static final String CMD_MSG_PRIVATE = "MSG_PRIVATE";     // C -> S: MSG_PRIVATE|targetUser|nội_dung
     public static final String RES_NEW_PRIVATE_MSG = "NEW_PRIVATE_MSG"; // S -> C: NEW_PRIVATE_MSG|sender|target|timestamp|nội_dung
     public static final String RES_SYSTEM_MSG = "SYSTEM_MSG";       // S -> C: SYSTEM_MSG|nội_dung
+    public static final String CMD_GET_HISTORY = "GET_HISTORY";     // C -> S: GET_HISTORY|groupName
     public static final String RES_HISTORY = "HISTORY";             // S -> C: HISTORY|groupName|count|item1;;item2;;...
 
     // --- Truyền File (File Transfer) ---
@@ -43,6 +45,18 @@ public class Protocol {
     // --- Danh sách người dùng & Trạng thái ---
     public static final String CMD_GET_USERS = "GET_USERS";         // C -> S: GET_USERS
     public static final String RES_USER_LIST = "USER_LIST";         // S -> C: USER_LIST|user1:ROLE:STATUS,user2:ROLE:STATUS
+
+    // --- Quản trị Nhóm (Dành cho Trưởng nhóm / Admin) ---
+    public static final String CMD_GET_GROUP_MEMBERS = "GET_GROUP_MEMBERS"; // C -> S: GET_GROUP_MEMBERS|groupName
+    public static final String RES_GROUP_MEMBERS = "GROUP_MEMBERS";         // S -> C: GROUP_MEMBERS|groupName|creator|u1:online:muted,...
+    public static final String CMD_GROUP_CMD = "GROUP_CMD";                 // C -> S: GROUP_CMD|ACTION|groupName|extra
+    public static final String GACT_KICK = "KICK";                          // GROUP_CMD|KICK|groupName|targetUser
+    public static final String GACT_MUTE = "MUTE";                          // GROUP_CMD|MUTE|groupName|targetUser
+    public static final String GACT_UNMUTE = "UNMUTE";                      // GROUP_CMD|UNMUTE|groupName|targetUser
+    public static final String GACT_SET_CODE = "SET_CODE";                  // GROUP_CMD|SET_CODE|groupName|newCode
+    public static final String GACT_CLEAR_HISTORY = "CLEAR_HISTORY";        // GROUP_CMD|CLEAR_HISTORY|groupName
+    public static final String GACT_DELETE = "DELETE";                      // GROUP_CMD|DELETE|groupName
+    public static final String NOTIFY_GROUP_KICKED = "GROUP_KICKED";        // S -> C: GROUP_KICKED|groupName|reason
 
     // --- Lệnh Quản trị (Admin Moderation) ---
     public static final String CMD_ADMIN = "ADMIN_CMD";             // C -> S: ADMIN_CMD|ACTION|targetUser|params

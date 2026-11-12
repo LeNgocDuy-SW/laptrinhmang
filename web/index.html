@@ -2,7 +2,7 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Multi-Client Cloud Chat</title>
     <link rel="stylesheet" href="style.css">
 </head>
@@ -63,15 +63,6 @@
                     <button type="button" class="eye-toggle" onclick="togglePasswordVisibility()" title="Ẩn/Hiện mật khẩu">👁</button>
                 </div>
 
-                <!-- Ô Role Selector (Chỉ hiện khi Đăng ký) -->
-                <div id="roleSelectRow" class="neumorphic-input-box" style="display: none;">
-                    <span class="input-icon">⭐</span>
-                    <select id="authRole">
-                        <option value="USER">USER (Người dùng thường)</option>
-                        <option value="ADMIN">ADMIN (Quản trị viên)</option>
-                    </select>
-                </div>
-
                 <!-- Hàng Remember Me & Forgot Password -->
                 <div class="form-row" id="rememberRow">
                     <label class="checkbox-label">
@@ -126,9 +117,11 @@
     <!-- MÀN HÌNH 2: GIAO DIỆN PHÒNG CHAT 3 CỘT (CHUẨN DRIBBLE MẪU)    -->
     <!-- ============================================================= -->
     <div id="chatScreen" class="chat-app" style="display: none;">
-        
+        <!-- Lớp nền mờ khi mở Drawer trên điện thoại -->
+        <div id="mobileDrawerBackdrop" class="mobile-drawer-backdrop" onclick="closeMobileDrawers()"></div>
+
         <!-- CỘT 1: SIDEBAR TRÁI (PROFILE, TÌM KIẾM, FAVOURITES, GROUPS) -->
-        <aside class="sidebar-left">
+        <aside id="leftSidebar" class="sidebar-left">
             <!-- Header User Profile -->
             <div class="user-profile-header">
                 <div class="user-avatar-wrap">
@@ -139,6 +132,7 @@
                     <strong class="user-display-name" id="myDisplayName">Username</strong>
                 </div>
                 <button class="btn-circle-add" onclick="openCreateGroupModal()" title="Tạo nhóm mới">+</button>
+                <button type="button" class="mobile-only-btn mobile-close-btn" onclick="closeMobileDrawers()" title="Đóng">✕</button>
             </div>
 
             <!-- Pill Search -->
@@ -172,7 +166,7 @@
                 </div>
 
                 <!-- Groups Section -->
-                <div class="section-label" style="margin-top: 18px;">Groups (Yêu Cầu Mã)</div>
+                <div class="section-label" style="margin-top: 18px;">Groups (Nhóm Người Dùng Tạo)</div>
                 <div class="groups-list" id="groupsContainer">
                     <!-- Danh sách nhóm được nạp động từ server -->
                 </div>
@@ -184,12 +178,17 @@
             <!-- Chat Header -->
             <header class="chat-header">
                 <div class="chat-header-left">
-                    <h2 class="active-group-title" id="activeChatTitle">Friends & Family</h2>
-                    <span class="active-group-subtitle" id="activeChatSubtitle">🟢 1 Online</span>
+                    <button type="button" id="btnMobileGroups" class="mobile-only-btn mobile-nav-btn" onclick="toggleMobileDrawer('left')" title="Danh sách nhóm">☰</button>
+                    <div class="chat-title-wrap">
+                        <h2 class="active-group-title" id="activeChatTitle">Friends & Family</h2>
+                        <span class="active-group-subtitle" id="activeChatSubtitle">👥 1 Thành viên • 🟢 1 Online</span>
+                    </div>
                 </div>
                 <div class="chat-header-right">
-                    <button class="btn-pill-small secondary" onclick="openCreateGroupModal()">✨ Tạo Nhóm</button>
-                    <button class="btn-pill-small danger" onclick="doLogout()">🚪 Đăng Xuất</button>
+                    <button type="button" class="btn-pill-small secondary" onclick="openCreateGroupModal()" title="Tạo nhóm mới">✨ <span class="btn-text-desktop">Tạo Nhóm</span><span class="btn-text-mobile">Tạo</span></button>
+                    <button type="button" class="btn-pill-small primary" onclick="openJoinGroupByCodeModal()" title="Tham gia nhóm bằng mã">🔑 <span class="btn-text-desktop">Tham Gia Nhóm</span><span class="btn-text-mobile">Vào nhóm</span></button>
+                    <button type="button" id="btnMobileMembers" class="mobile-only-btn btn-pill-small secondary" onclick="toggleMobileDrawer('right')" title="Thành viên & Thông tin nhóm">👥</button>
+                    <button type="button" class="btn-pill-small danger" onclick="doLogout()" title="Đăng xuất">🚪 <span class="btn-text-desktop">Đăng Xuất</span></button>
                 </div>
             </header>
 
@@ -198,32 +197,61 @@
                 <!-- Tin nhắn hiển thị tại đây -->
             </div>
 
-            <!-- Thanh nhập tin nhắn Pill dưới đáy -->
+            <!-- Thanh trả lời tin nhắn (Reply Bar) + Chọn Emoji & Sticker + Nhập liệu -->
             <footer class="chat-input-wrapper">
+                <!-- Popup chọn Emoji & Sticker -->
+                <div id="emojiStickerPicker" class="emoji-sticker-popup" style="display: none;">
+                    <div class="picker-tabs">
+                        <button type="button" id="tabBtnEmoji" class="picker-tab active" onclick="switchPickerTab('emoji')">😊 Icon / Emoji</button>
+                        <button type="button" id="tabBtnSticker" class="picker-tab" onclick="switchPickerTab('sticker')">🎨 Sticker</button>
+                    </div>
+                    <div id="pickerEmojiGrid" class="picker-grid emoji-grid"></div>
+                    <div id="pickerStickerGrid" class="picker-grid sticker-grid" style="display: none;"></div>
+                </div>
+
+                <!-- Thanh xem trước khi đang trả lời tin nhắn người khác -->
+                <div id="replyPreviewBar" class="reply-preview-bar" style="display: none;">
+                    <span id="replyPreviewText">↩ Đang trả lời...</span>
+                    <button type="button" class="reply-cancel-btn" onclick="cancelReply()" title="Hủy trả lời">✕</button>
+                </div>
+
                 <div class="pill-chat-input-box">
-                    <button type="button" class="action-btn" onclick="openEmojiPicker()" title="Chèn biểu tượng cảm xúc">😊</button>
+                    <button type="button" class="action-btn" onclick="toggleEmojiPicker()" title="Chọn Icon & Sticker">😊</button>
                     <input type="text" id="txtChatMessage" placeholder="Type a message..." autocomplete="off" onkeydown="handleInputKeyDown(event)">
                     <button type="button" class="btn-send-pill" onclick="sendActiveMessage()">Send</button>
                 </div>
             </footer>
         </main>
 
-        <!-- CỘT 3: SIDEBAR PHẢI (GROUP INFO & MEMBERS) -->
-        <aside class="sidebar-right">
+        <!-- CỘT 3: SIDEBAR PHẢI (GROUP INFO, ĐẶC QUYỀN TRƯỞNG NHÓM & MEMBERS) -->
+        <aside id="rightSidebar" class="sidebar-right">
             <div class="group-info-top">
                 <div class="ginfo-header-row">
                     <span class="ginfo-sub">Group Info</span>
-                    <button class="more-dots-btn" onclick="showOptionsMenu()">•••</button>
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <button class="more-dots-btn" onclick="showOptionsMenu()">•••</button>
+                        <button type="button" class="mobile-only-btn mobile-close-btn" onclick="closeMobileDrawers()" title="Đóng">✕</button>
+                    </div>
                 </div>
                 <h3 class="ginfo-name" id="rightGroupTitle">Friends & Family</h3>
                 <div class="ginfo-details">
-                    <p>👥 Group details: Phòng chat bảo mật</p>
-                    <p>📅 25 Jun, 2022</p>
+                    <p id="rightGroupLeader">👑 Trưởng nhóm: admin</p>
+                    <p id="rightGroupCount">👥 Thành viên: 1</p>
+                </div>
+
+                <!-- Đặc quyền dành riêng cho Trưởng Nhóm -->
+                <div id="leaderControls" class="leader-controls-box" style="display: none;">
+                    <div class="leader-badge-title">👑 Đặc quyền Trưởng nhóm</div>
+                    <div class="leader-btn-row">
+                        <button type="button" class="btn-leader" onclick="leaderChangePin()">🔑 Đổi PIN</button>
+                        <button type="button" class="btn-leader" onclick="leaderClearHistory()">🧹 Xóa LS</button>
+                        <button type="button" class="btn-leader danger" onclick="leaderDeleteGroup()">🗑️ Giải tán</button>
+                    </div>
                 </div>
             </div>
 
             <div class="members-section">
-                <div class="members-header" id="membersCountLabel">Members (1)</div>
+                <div class="members-header" id="membersCountLabel">Thành viên nhóm (1)</div>
                 <div class="members-list" id="membersContainer">
                     <!-- Danh sách thành viên nạp động -->
                 </div>
@@ -257,14 +285,14 @@
         </div>
     </div>
 
-    <!-- Modal 2: Nhập Mã PIN Để Vào Nhóm -->
+    <!-- Modal 2: Tham Gia Nhóm Bằng Mã Định Danh -->
     <div id="modalJoinGroup" class="modal-backdrop" style="display: none;">
         <div class="modal-card">
-            <h3>🔐 Nhập Mã PIN Nhóm</h3>
-            <p class="modal-desc" id="joinGroupDesc">Nhóm này được bảo vệ. Vui lòng nhập mã PIN để mở khóa và tham gia trò chuyện.</p>
+            <h3>🔑 Tham Gia Nhóm Bằng Mã</h3>
+            <p class="modal-desc" id="joinGroupDesc">Nhập mã định danh riêng của nhóm để tham gia trò chuyện.</p>
             <div class="modal-field">
-                <label>Mã PIN Nhóm:</label>
-                <input type="password" id="joinGroupInputCode" placeholder="Nhập mã PIN..." required>
+                <label>Mã Định Danh Nhóm:</label>
+                <input type="text" id="joinGroupInputCode" placeholder="Ví dụ: 8888, TEAM-01..." onkeydown="if(event.key==='Enter') submitJoinGroup();" required>
             </div>
             <div class="modal-actions">
                 <button type="button" class="btn-pill-small secondary" onclick="closeModal('modalJoinGroup')">Hủy</button>

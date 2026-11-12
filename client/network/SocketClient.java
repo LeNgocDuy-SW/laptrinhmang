@@ -109,7 +109,25 @@ public class SocketClient {
     }
 
     public void requestGroupList() {
-        sendPacket(Protocol.CMD_GET_ROOMS);
+        sendPacket(Protocol.CMD_GET_GROUPS);
+    }
+
+    public void requestHistory(String groupName) {
+        sendPacket(Protocol.CMD_GET_HISTORY + Protocol.DELIMITER + groupName);
+    }
+
+    public void requestGroupMembers(String groupName) {
+        sendPacket(Protocol.CMD_GET_GROUP_MEMBERS + Protocol.DELIMITER + groupName);
+    }
+
+    public void sendGroupCommand(String action, String groupName, String extra) {
+        StringBuilder sb = new StringBuilder(Protocol.CMD_GROUP_CMD)
+                .append(Protocol.DELIMITER).append(action)
+                .append(Protocol.DELIMITER).append(groupName);
+        if (extra != null && !extra.isEmpty()) {
+            sb.append(Protocol.DELIMITER).append(extra);
+        }
+        sendPacket(sb.toString());
     }
 
     public void logout() {

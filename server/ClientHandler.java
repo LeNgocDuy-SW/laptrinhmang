@@ -94,6 +94,20 @@ public class ClientHandler implements Runnable {
                 break;
             case Protocol.CMD_GET_GROUPS:
                 sendGroupList();
+                sendMyGroups();
+                break;
+            case Protocol.CMD_GET_HISTORY:
+                if (authenticated) {
+                    sendChatHistory(payload.trim().isEmpty() ? Protocol.DEFAULT_GROUP : payload.trim());
+                }
+                break;
+            case Protocol.CMD_GET_GROUP_MEMBERS:
+                if (authenticated && !payload.trim().isEmpty()) {
+                    sendPacket(roomManager.buildGroupMembersPacket(payload.trim()));
+                }
+                break;
+            case Protocol.CMD_GROUP_CMD:
+                handleGroupCommand(payload);
                 break;
             case Protocol.CMD_MSG_GROUP:
                 handleGroupMessage(payload);
@@ -158,6 +172,7 @@ public class ClientHandler implements Runnable {
         // Nạp lịch sử phòng mặc định
         sendChatHistory("Friends & Family");
         sendGroupList();
+        sendMyGroups();
     }
 
     private void handleRegister(String payload) {
@@ -169,14 +184,14 @@ public class ClientHandler implements Runnable {
 
         String user = parts[0].trim();
         String pass = parts[1].trim();
-        String reqRole = parts.length > 2 ? parts[2].trim() : Protocol.ROLE_USER;
 
         if (user.length() < 3 || pass.length() < 3) {
             sendPacket(Protocol.RES_REGISTER + Protocol.DELIMITER + Protocol.FAILED + Protocol.DELIMITER + "Tài khoản và mật khẩu phải từ 3 ký tự trở lên.");
             return;
         }
 
-        boolean ok = userDAO.register(user, pass, reqRole);
+        // Mặc định tài khoản đăng ký mới luôn là USER (chỉ có 1 ADMIN duy nhất)
+        boolean ok = userDAO.register(user, pass, Protocol.ROLE_USER);
         if (ok) {
             sendPacket(Protocol.RES_REGISTER + Protocol.DELIMITER + Protocol.SUCCESS + Protocol.DELIMITER + "Đăng ký thành công! Hãy đăng nhập.");
         } else {
@@ -206,35 +221,46 @@ public class ClientHandler implements Runnable {
         boolean ok = groupDAO.createGroup(groupName, groupCode, this.username);
         if (ok) {
             sendPacket(Protocol.RES_CREATE_GROUP + Protocol.DELIMITER + Protocol.SUCCESS + Protocol.DELIMITER + groupName + Protocol.DELIMITER + groupCode);
+            sendMyGroups();
             roomManager.broadcastGroupList();
             roomManager.broadcast(Protocol.RES_SYSTEM_MSG + Protocol.DELIMITER + "🎉 " + this.username + " vừa tạo nhóm mới: [" + groupName + "]!");
         } else {
-            sendPacket(Protocol.RES_CREATE_GROUP + Protocol.DELIMITER + Protocol.FAILED + Protocol.DELIMITER + "Tên nhóm [" + groupName + "] đã tồn tại.");
+            sendPacket(Protocol.RES_CREATE_GROUP + Protocol.DELIMITER + Protocol.FAILED + Protocol.DELIMITER + "Tên nhóm hoặc mã định danh [" + groupCode + "] đã được sử dụng!");
         }
     }
 
     /**
-     * Tham gia nhóm khi nhập mã nhóm
+     * Tham gia nhóm chỉ bằng mã nhóm (hoặc kèm tên nhóm)
      */
     private void handleJoinGroup(String payload) {
         if (!authenticated) return;
         String[] parts = payload.split(Protocol.DELIMITER_REGEX, 2);
-        if (parts.length < 2) {
+        String groupName = parts.length == 2 ? parts[0].trim() : "";
+        String inputCode = (parts.length == 2 ? parts[1] : parts[0]).trim();
+
+        if (inputCode.isEmpty()) {
             sendPacket(Protocol.RES_JOIN_GROUP + Protocol.DELIMITER + Protocol.FAILED + Protocol.DELIMITER + "Vui lòng nhập mã nhóm.");
             return;
         }
 
-        String groupName = parts[0].trim();
-        String inputCode = parts[1].trim();
+        boolean valid;
+        if (groupName.isEmpty()) {
+            // Tìm trực tiếp tên nhóm theo mã định danh duy nhất
+            groupName = groupDAO.findGroupByCode(inputCode);
+            valid = (groupName != null);
+        } else {
+            valid = groupDAO.verifyGroupCode(groupName, inputCode);
+        }
 
-        boolean valid = groupDAO.verifyGroupCode(groupName, inputCode);
         if (valid) {
             groupDAO.addMember(groupName, this.username);
+            sendMyGroups();
             sendPacket(Protocol.RES_JOIN_GROUP + Protocol.DELIMITER + Protocol.SUCCESS + Protocol.DELIMITER + groupName);
             sendChatHistory(groupName);
             roomManager.broadcastGroupList();
+            roomManager.notifyGroupMembersUpdated(groupName);
         } else {
-            sendPacket(Protocol.RES_JOIN_GROUP + Protocol.DELIMITER + Protocol.FAILED + Protocol.DELIMITER + "Mã nhóm không chính xác! Vui lòng thử lại.");
+            sendPacket(Protocol.RES_JOIN_GROUP + Protocol.DELIMITER + Protocol.FAILED + Protocol.DELIMITER + "Mã nhóm không tồn tại hoặc không chính xác!");
         }
     }
 
@@ -250,6 +276,20 @@ public class ClientHandler implements Runnable {
 
         String groupName = parts[0].trim();
         String content = parts[1].trim();
+        if (content.isEmpty() || "[JOIN_NOTIFY]".equals(content)) return;
+
+        if (!Protocol.DEFAULT_GROUP.equalsIgnoreCase(groupName)
+                && !groupDAO.isMember(groupName, this.username)
+                && !groupDAO.isGroupLeader(groupName, this.username)) {
+            sendPacket(Protocol.RES_SYSTEM_MSG + Protocol.DELIMITER + "Bạn không còn là thành viên của nhóm [" + groupName + "]!");
+            return;
+        }
+
+        if (groupDAO.isMutedInGroup(groupName, this.username)) {
+            sendPacket(Protocol.RES_SYSTEM_MSG + Protocol.DELIMITER + "🔇 Bạn đã bị Trưởng nhóm chặn gửi tin trong nhóm [" + groupName + "]!");
+            return;
+        }
+
         String time = LocalDateTime.now().format(TIME_FMT);
 
         MessagePacket msg = new MessagePacket(MessagePacket.TYPE_PUBLIC, this.username, this.role, "ALL", groupName, content);
@@ -349,6 +389,65 @@ public class ClientHandler implements Runnable {
         }
     }
 
+    private void handleGroupCommand(String payload) {
+        if (!authenticated) return;
+        String[] parts = payload.split(Protocol.DELIMITER_REGEX, 3);
+        if (parts.length < 2) return;
+
+        String action = parts[0].toUpperCase();
+        String groupName = parts[1].trim();
+        String extra = parts.length > 2 ? parts[2].trim() : "";
+
+        boolean isLeader = groupDAO.isGroupLeader(groupName, this.username) || Protocol.ROLE_ADMIN.equalsIgnoreCase(this.role);
+        if (!isLeader) {
+            sendPacket(Protocol.RES_SYSTEM_MSG + Protocol.DELIMITER + "LỖI: Chỉ Trưởng nhóm [" + groupName + "] mới có quyền thực hiện thao tác này!");
+            return;
+        }
+
+        switch (action) {
+            case Protocol.GACT_KICK:
+                if (!extra.isEmpty() && !extra.equalsIgnoreCase(this.username)) {
+                    groupDAO.removeMember(groupName, extra);
+                    roomManager.notifyGroupKicked(extra, groupName, "Bạn đã bị Trưởng nhóm [" + this.username + "] mời khỏi nhóm [" + groupName + "].");
+                    roomManager.broadcastGroupList();
+                    roomManager.notifyGroupMembersUpdated(groupName);
+                }
+                break;
+            case Protocol.GACT_MUTE:
+                if (!extra.isEmpty() && !extra.equalsIgnoreCase(this.username)) {
+                    groupDAO.muteInGroup(groupName, extra, this.username);
+                    roomManager.notifyGroupMembersUpdated(groupName);
+                    roomManager.broadcast(Protocol.RES_SYSTEM_MSG + Protocol.DELIMITER + "🔇 Trưởng nhóm " + this.username + " đã chặn @" + extra + " nhắn tin trong nhóm [" + groupName + "].");
+                }
+                break;
+            case Protocol.GACT_UNMUTE:
+                if (!extra.isEmpty()) {
+                    groupDAO.unmuteInGroup(groupName, extra);
+                    roomManager.notifyGroupMembersUpdated(groupName);
+                    roomManager.broadcast(Protocol.RES_SYSTEM_MSG + Protocol.DELIMITER + "🔊 Trưởng nhóm " + this.username + " đã mở chặn chat cho @" + extra + " trong nhóm [" + groupName + "].");
+                }
+                break;
+            case Protocol.GACT_SET_CODE:
+                if (!extra.isEmpty() && groupDAO.updateGroupCode(groupName, extra)) {
+                    sendPacket(Protocol.RES_SYSTEM_MSG + Protocol.DELIMITER + "🔑 Đã đổi mã PIN nhóm [" + groupName + "] thành: " + extra);
+                }
+                break;
+            case Protocol.GACT_CLEAR_HISTORY:
+                messageDAO.clearGroupHistory(groupName);
+                roomManager.broadcast(Protocol.RES_SYSTEM_MSG + Protocol.DELIMITER + "🧹 Trưởng nhóm " + this.username + " đã xóa lịch sử tin nhắn của nhóm [" + groupName + "].");
+                break;
+            case Protocol.GACT_DELETE:
+                if (!Protocol.DEFAULT_GROUP.equalsIgnoreCase(groupName) && groupDAO.deleteGroup(groupName)) {
+                    roomManager.broadcast(Protocol.NOTIFY_GROUP_KICKED + Protocol.DELIMITER + groupName + Protocol.DELIMITER + "Nhóm [" + groupName + "] đã bị Trưởng nhóm giải tán.");
+                    roomManager.broadcastGroupList();
+                    roomManager.broadcast(Protocol.RES_SYSTEM_MSG + Protocol.DELIMITER + "🗑️ Nhóm [" + groupName + "] đã bị Trưởng nhóm " + this.username + " giải tán.");
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
     private void handleChangePassword(String payload) {
         if (!authenticated) return;
         String[] parts = payload.split(Protocol.DELIMITER_REGEX, 2);
@@ -371,14 +470,26 @@ public class ClientHandler implements Runnable {
         sendPacket(sb.toString());
     }
 
-    private void sendGroupList() {
-        List<ChatGroup> list = groupDAO.getAllGroups();
+    void sendGroupList() {
+        if (!authenticated || username == null) return;
+        List<ChatGroup> list = groupDAO.getUserGroups(this.username);
         StringBuilder sb = new StringBuilder(Protocol.RES_GROUP_LIST).append(Protocol.DELIMITER);
         boolean first = true;
         for (ChatGroup g : list) {
             if (!first) sb.append(",");
-            sb.append(g.getGroupName()).append(":").append(g.getMemberCount());
+            sb.append(g.getGroupName()).append(":").append(g.getMemberCount()).append(":").append(g.getCreator());
             first = false;
+        }
+        sendPacket(sb.toString());
+    }
+
+    private void sendMyGroups() {
+        if (!authenticated || username == null) return;
+        List<String> joined = groupDAO.getJoinedGroups(this.username);
+        StringBuilder sb = new StringBuilder(Protocol.RES_MY_GROUPS).append(Protocol.DELIMITER);
+        for (int i = 0; i < joined.size(); i++) {
+            if (i > 0) sb.append(",");
+            sb.append(joined.get(i));
         }
         sendPacket(sb.toString());
     }

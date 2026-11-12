@@ -16,8 +16,12 @@ import java.time.format.DateTimeFormatter;
  * Tạo bảng users, messages, chat_groups, group_members.
  */
 public class DatabaseConnection {
-    private static final String DB_URL = "jdbc:sqlite:chat.db";
     private static final String SALT = "LTM_SECURE_SALT_2026";
+
+    private static String getDbUrl() {
+        String dbPath = System.getProperty("chat.db.path", "chat.db");
+        return "jdbc:sqlite:" + dbPath;
+    }
 
     static {
         try {
@@ -29,12 +33,22 @@ public class DatabaseConnection {
     }
 
     public static Connection getConnection() throws SQLException {
-        Connection conn = DriverManager.getConnection(DB_URL);
+        Connection conn = DriverManager.getConnection(getDbUrl());
         try (Statement stmt = conn.createStatement()) {
             stmt.execute("PRAGMA journal_mode=WAL;");
+            stmt.execute("PRAGMA synchronous=NORMAL;");
             stmt.execute("PRAGMA busy_timeout=5000;");
         }
         return conn;
+    }
+
+    /**
+     * Đồng bộ dữ liệu từ file WAL xuống file DB chính khi tắt Server.
+     */
+    public static void checkpoint() {
+        try (Connection conn = getConnection(); Statement stmt = conn.createStatement()) {
+            stmt.execute("PRAGMA wal_checkpoint(TRUNCATE);");
+        } catch (SQLException ignored) {}
     }
 
     public static void initDatabase() {
@@ -73,6 +87,14 @@ public class DatabaseConnection {
                 + "PRIMARY KEY (group_name, username)"
                 + ");";
 
+        String sqlCreateGroupMutes = "CREATE TABLE IF NOT EXISTS group_mutes ("
+                + "group_name TEXT NOT NULL, "
+                + "username TEXT NOT NULL, "
+                + "muted_by TEXT NOT NULL, "
+                + "muted_at TEXT NOT NULL, "
+                + "PRIMARY KEY (group_name, username)"
+                + ");";
+
         try (Connection conn = getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(sqlCreateUsers);
             stmt.execute(sqlCreateMessages);
@@ -83,6 +105,10 @@ public class DatabaseConnection {
             }
             stmt.execute(sqlCreateGroups);
             stmt.execute(sqlCreateMembers);
+            stmt.execute(sqlCreateGroupMutes);
+            // Xóa 4 nhóm mẫu có sẵn nếu tồn tại, chỉ giữ phòng mặc định và nhóm do người dùng tạo
+            stmt.execute("DELETE FROM chat_groups WHERE group_name IN ('CoCuit', 'Weekend Meetup', 'Colleagues Meetup', 'Office Friends') AND creator = 'admin';");
+            stmt.execute("DELETE FROM group_members WHERE group_name IN ('CoCuit', 'Weekend Meetup', 'Colleagues Meetup', 'Office Friends');");
             seedDefaultData(conn);
         } catch (SQLException e) {
             System.err.println("[DB] Lỗi khởi tạo database: " + e.getMessage());
@@ -100,26 +126,14 @@ public class DatabaseConnection {
         String insertUser1 = "INSERT OR IGNORE INTO users (username, password_hash, role, status, created_at) "
                 + "VALUES ('user1', '" + userPassHash + "', '" + Protocol.ROLE_USER + "', '" + Protocol.STATUS_ACTIVE + "', '" + now + "');";
 
-        // Seed các nhóm mặc định
+        // Chỉ giữ 1 phòng mặc định chung, không seed thêm 4 nhóm mẫu nữa
         String insertGroup1 = "INSERT OR IGNORE INTO chat_groups (group_name, group_code, creator, created_at) "
                 + "VALUES ('Friends & Family', '" + Protocol.DEFAULT_GROUP_CODE + "', 'admin', '" + now + "');";
-        String insertGroup2 = "INSERT OR IGNORE INTO chat_groups (group_name, group_code, creator, created_at) "
-                + "VALUES ('CoCuit', 'cocuit', 'admin', '" + now + "');";
-        String insertGroup3 = "INSERT OR IGNORE INTO chat_groups (group_name, group_code, creator, created_at) "
-                + "VALUES ('Weekend Meetup', 'weekend', 'admin', '" + now + "');";
-        String insertGroup4 = "INSERT OR IGNORE INTO chat_groups (group_name, group_code, creator, created_at) "
-                + "VALUES ('Colleagues Meetup', 'colleagues', 'admin', '" + now + "');";
-        String insertGroup5 = "INSERT OR IGNORE INTO chat_groups (group_name, group_code, creator, created_at) "
-                + "VALUES ('Office Friends', 'office', 'admin', '" + now + "');";
 
         try (Statement stmt = conn.createStatement()) {
             stmt.execute(insertAdmin);
             stmt.execute(insertUser1);
             stmt.execute(insertGroup1);
-            stmt.execute(insertGroup2);
-            stmt.execute(insertGroup3);
-            stmt.execute(insertGroup4);
-            stmt.execute(insertGroup5);
         } catch (SQLException e) {
             System.err.println("[DB] Lỗi seed data: " + e.getMessage());
         }

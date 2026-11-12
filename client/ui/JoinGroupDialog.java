@@ -48,13 +48,17 @@ public class JoinGroupDialog extends JDialog {
         formCard.setLayout(new GridLayout(3, 1, 0, 10));
         formCard.setBorder(new EmptyBorder(14, 18, 14, 18));
 
-        JLabel lblTitle = new JLabel("🔐 Nhập Mã Nhóm: [" + groupName + "]", JLabel.CENTER);
+        String titleText = (groupName != null && !groupName.trim().isEmpty())
+                ? "🔐 Nhập Mã Nhóm: [" + groupName + "]"
+                : "🔑 Tham Gia Nhóm Bằng Mã Định Danh";
+        JLabel lblTitle = new JLabel(titleText, JLabel.CENTER);
         lblTitle.setFont(new Font("Segoe UI", Font.BOLD, 15));
         lblTitle.setForeground(UIUtils.TEXT_DARK);
         formCard.add(lblTitle);
 
-        txtGroupCode = new PillTextField("Nhập mã nhóm (PIN) được cấp...", "🔑");
+        txtGroupCode = new PillTextField("Nhập mã định danh của nhóm...", "🔑");
         txtGroupCode.setPreferredSize(new Dimension(280, 36));
+        txtGroupCode.addActionListener(e -> doJoinGroup());
         formCard.add(txtGroupCode);
 
         JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
@@ -83,7 +87,7 @@ public class JoinGroupDialog extends JDialog {
             return;
         }
 
-        socketClient.joinGroup(groupName, code);
+        socketClient.joinGroup(groupName != null ? groupName : "", code);
         dispose();
     }
 }

@@ -18,7 +18,7 @@ import java.util.List;
 public class UserDAO {
 
     /**
-     * Đăng ký tài khoản mới.
+     * Đăng ký tài khoản mới (luôn mặc định là USER; chỉ có duy nhất 1 tài khoản ADMIN hệ thống).
      * @return true nếu đăng ký thành công, false nếu tên người dùng đã tồn tại.
      */
     public boolean register(String username, String password, String role) {
@@ -27,7 +27,8 @@ public class UserDAO {
         }
         username = username.trim();
         String passwordHash = DatabaseConnection.hashPassword(password);
-        String finalRole = (role != null && Protocol.ROLE_ADMIN.equalsIgnoreCase(role)) ? Protocol.ROLE_ADMIN : Protocol.ROLE_USER;
+        // Luôn gán mặc định USER để đảm bảo hệ thống chỉ có duy nhất 1 tài khoản admin
+        String finalRole = Protocol.ROLE_USER;
         String now = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
 
         String sql = "INSERT INTO users (username, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?)";

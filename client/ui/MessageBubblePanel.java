@@ -5,10 +5,11 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.geom.RoundRectangle2D;
+import java.util.function.BiConsumer;
 
 /**
  * MessageBubblePanel: Hiển thị từng tin nhắn dạng Bong bóng Chat (Chat Bubble)
- * chuẩn thiết kế Messenger / Dribbble với Avatar và canh lề thông minh.
+ * hỗ trợ Trích dẫn trả lời tin nhắn (Reply), Sticker sinh động, và Avatar.
  */
 public class MessageBubblePanel extends JPanel {
     private final String sender;
@@ -18,15 +19,21 @@ public class MessageBubblePanel extends JPanel {
     private final boolean isMine;
     private final boolean isPrivate;
     private final boolean isSystem;
+    private final BiConsumer<String, String> onReply;
 
     public MessageBubblePanel(String sender, String role, String timestamp, String content, boolean isMine, boolean isPrivate, boolean isSystem) {
+        this(sender, role, timestamp, content, isMine, isPrivate, isSystem, null);
+    }
+
+    public MessageBubblePanel(String sender, String role, String timestamp, String content, boolean isMine, boolean isPrivate, boolean isSystem, BiConsumer<String, String> onReply) {
         this.sender = sender;
         this.role = role;
         this.timestamp = timestamp;
-        this.content = content;
+        this.content = content != null ? content : "";
         this.isMine = isMine;
         this.isPrivate = isPrivate;
         this.isSystem = isSystem;
+        this.onReply = onReply;
 
         setOpaque(false);
         setLayout(new BorderLayout(0, 0));
@@ -49,11 +56,36 @@ public class MessageBubblePanel extends JPanel {
             return;
         }
 
-        // Hàng tin nhắn chính: Chiếm trọn bề ngang để đẩy trái/phải chuẩn xác
+        // Tách Reply & Sticker từ content
+        String replySender = null;
+        String replySnippet = null;
+        String mainContent = content;
+
+        if (mainContent.startsWith("[[REPLY|")) {
+            int endIdx = mainContent.indexOf("]]");
+            if (endIdx > 8) {
+                String meta = mainContent.substring(8, endIdx);
+                String[] parts = meta.split("\\|", 2);
+                replySender = parts.length > 0 ? parts[0] : "";
+                replySnippet = parts.length > 1 ? parts[1] : "";
+                mainContent = mainContent.substring(endIdx + 2);
+            }
+        }
+
+        String stickerIcon = null;
+        String stickerLabel = null;
+        if (mainContent.startsWith("[[STICKER|") && mainContent.endsWith("]]")) {
+            String meta = mainContent.substring(10, mainContent.length() - 2);
+            String[] parts = meta.split("\\|", 2);
+            stickerIcon = parts.length > 0 ? parts[0] : "🎉";
+            stickerLabel = parts.length > 1 ? parts[1] : "Sticker";
+        }
+
+        final String plainSnippet = stickerLabel != null ? "[Sticker] " + stickerLabel : mainContent;
+
         JPanel row = new JPanel(new BorderLayout(10, 0));
         row.setOpaque(false);
 
-        // Avatar bên trái (nếu của người khác)
         if (!isMine) {
             AvatarPanel av = new AvatarPanel(sender, 36);
             JPanel avWrap = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
@@ -62,12 +94,11 @@ public class MessageBubblePanel extends JPanel {
             row.add(avWrap, BorderLayout.WEST);
         }
 
-        // Cột trung tâm chứa Tên, Bong bóng chat và Thời gian
         JPanel contentCol = new JPanel();
         contentCol.setLayout(new BoxLayout(contentCol, BoxLayout.Y_AXIS));
         contentCol.setOpaque(false);
 
-        // Hàng thông tin người gửi & Thời gian
+        // Hàng thông tin người gửi, Thời gian & nút Trả lời
         JPanel metaRow = new JPanel(new FlowLayout(isMine ? FlowLayout.RIGHT : FlowLayout.LEFT, 6, 0));
         metaRow.setOpaque(false);
 
@@ -96,19 +127,32 @@ public class MessageBubblePanel extends JPanel {
         lblTime.setForeground(UIUtils.TEXT_MUTED);
         metaRow.add(lblTime);
 
+        if (onReply != null) {
+            JButton btnReply = new JButton("↩ Trả lời");
+            btnReply.setFont(new Font("Segoe UI", Font.BOLD, 10));
+            btnReply.setForeground(UIUtils.PRIMARY_BLUE);
+            btnReply.setContentAreaFilled(false);
+            btnReply.setBorder(new EmptyBorder(0, 4, 0, 4));
+            btnReply.setCursor(new Cursor(Cursor.HAND_CURSOR));
+            btnReply.addActionListener(e -> onReply.accept(sender, plainSnippet));
+            metaRow.add(btnReply);
+        }
+
         contentCol.add(metaRow);
         contentCol.add(Box.createVerticalStrut(3));
 
-        // Bong bóng tin nhắn
-        BubbleBox bubble = new BubbleBox(content, isMine, isPrivate);
         JPanel bubbleRow = new JPanel(new FlowLayout(isMine ? FlowLayout.RIGHT : FlowLayout.LEFT, 0, 0));
         bubbleRow.setOpaque(false);
-        bubbleRow.add(bubble);
+
+        if (stickerIcon != null) {
+            bubbleRow.add(new StickerBox(stickerIcon, stickerLabel, replySender, replySnippet));
+        } else {
+            bubbleRow.add(new BubbleBox(mainContent, replySender, replySnippet, isMine, isPrivate));
+        }
 
         contentCol.add(bubbleRow);
         row.add(contentCol, BorderLayout.CENTER);
 
-        // Avatar bên phải (nếu của chính mình)
         if (isMine) {
             AvatarPanel av = new AvatarPanel(sender, 36);
             JPanel avWrap = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
@@ -122,25 +166,109 @@ public class MessageBubblePanel extends JPanel {
 
     @Override
     public Dimension getMaximumSize() {
-        // Cho phép giãn hết chiều ngang của JScrollPane
         Dimension pref = getPreferredSize();
         return new Dimension(Integer.MAX_VALUE, pref.height);
     }
 
     /**
-     * BubbleBox: Khối bong bóng chat bo tròn mềm mại
+     * StickerBox: Hiển thị Sticker lớn sinh động
+     */
+    private static class StickerBox extends JPanel {
+        public StickerBox(String icon, String label, String replySender, String replySnippet) {
+            setOpaque(false);
+            setLayout(new BorderLayout(0, 4));
+            setBorder(new EmptyBorder(8, 14, 8, 14));
+
+            if (replySender != null) {
+                add(createQuoteBox(replySender, replySnippet), BorderLayout.NORTH);
+            }
+
+            JPanel card = new JPanel(new BorderLayout(0, 2)) {
+                @Override
+                protected void paintComponent(Graphics g) {
+                    Graphics2D g2 = (Graphics2D) g.create();
+                    UIUtils.enableAntialiasing(g2);
+                    GradientPaint gp = new GradientPaint(0, 0, new Color(240, 249, 255), getWidth(), getHeight(), new Color(238, 242, 255));
+                    g2.setPaint(gp);
+                    g2.fill(new RoundRectangle2D.Float(0, 0, getWidth(), getHeight(), 22, 22));
+                    g2.setColor(new Color(191, 219, 254));
+                    g2.draw(new RoundRectangle2D.Float(0.5f, 0.5f, getWidth() - 1f, getHeight() - 1f, 22, 22));
+                    g2.dispose();
+                    super.paintComponent(g);
+                }
+            };
+            card.setOpaque(false);
+            card.setBorder(new EmptyBorder(10, 18, 10, 18));
+
+            JLabel lblEmoji = new JLabel(icon, JLabel.CENTER);
+            lblEmoji.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 44));
+
+            JLabel lblCap = new JLabel(label, JLabel.CENTER);
+            lblCap.setFont(new Font("Segoe UI", Font.BOLD, 12));
+            lblCap.setForeground(UIUtils.PRIMARY_BLUE);
+
+            card.add(lblEmoji, BorderLayout.CENTER);
+            card.add(lblCap, BorderLayout.SOUTH);
+            add(card, BorderLayout.CENTER);
+        }
+    }
+
+    private static JPanel createQuoteBox(String replySender, String replySnippet) {
+        JPanel quote = new JPanel(new BorderLayout()) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                UIUtils.enableAntialiasing(g2);
+                g2.setColor(new Color(255, 255, 255, 160));
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 10, 10);
+                g2.setColor(UIUtils.PRIMARY_BLUE);
+                g2.fillRoundRect(0, 2, 4, getHeight() - 4, 4, 4);
+                g2.dispose();
+                super.paintComponent(g);
+            }
+        };
+        quote.setOpaque(false);
+        quote.setBorder(new EmptyBorder(4, 10, 4, 10));
+
+        String shortSnip = replySnippet != null && replySnippet.length() > 48
+                ? replySnippet.substring(0, 48) + "..."
+                : (replySnippet != null ? replySnippet : "");
+        JLabel lblQuote = new JLabel("<html><b>↩ " + escapeHtml(replySender) + ":</b> " + escapeHtml(shortSnip) + "</html>");
+        lblQuote.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        lblQuote.setForeground(new Color(71, 85, 105));
+        quote.add(lblQuote, BorderLayout.CENTER);
+        return quote;
+    }
+
+    private static String escapeHtml(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    /**
+     * BubbleBox: Khối bong bóng chat bo tròn mềm mại (kèm khối Reply nếu có)
      */
     private static class BubbleBox extends JComponent {
         private final JTextArea textArea;
         private final boolean isMine;
         private final boolean isPrivate;
+        private JPanel quotePanel;
 
-        public BubbleBox(String text, boolean isMine, boolean isPrivate) {
+        public BubbleBox(String text, String replySender, String replySnippet, boolean isMine, boolean isPrivate) {
             this.isMine = isMine;
             this.isPrivate = isPrivate;
 
-            setLayout(new BorderLayout());
+            setLayout(new BorderLayout(0, 4));
             setOpaque(false);
+
+            if (replySender != null && !replySender.isEmpty()) {
+                quotePanel = createQuoteBox(replySender, replySnippet);
+                JPanel qWrap = new JPanel(new BorderLayout());
+                qWrap.setOpaque(false);
+                qWrap.setBorder(new EmptyBorder(8, 12, 0, 12));
+                qWrap.add(quotePanel, BorderLayout.CENTER);
+                add(qWrap, BorderLayout.NORTH);
+            }
 
             textArea = new JTextArea(text);
             textArea.setOpaque(false);
@@ -155,25 +283,26 @@ public class MessageBubblePanel extends JPanel {
             else textColor = UIUtils.BUBBLE_OTHER_TEXT;
 
             textArea.setForeground(textColor);
-            textArea.setBorder(new EmptyBorder(8, 14, 8, 14));
+            textArea.setBorder(new EmptyBorder(quotePanel != null ? 2 : 8, 14, 8, 14));
 
             add(textArea, BorderLayout.CENTER);
         }
 
         @Override
         public Dimension getPreferredSize() {
-            // Giới hạn chiều rộng tối đa của bubble là 480px để tự động xuống dòng đẹp mắt
             int maxWidth = 480;
             FontMetrics fm = textArea.getFontMetrics(textArea.getFont());
             int textWidth = fm.stringWidth(textArea.getText());
+            int qHeight = quotePanel != null ? quotePanel.getPreferredSize().height + 12 : 0;
+            int qWidth = quotePanel != null ? quotePanel.getPreferredSize().width + 24 : 0;
 
-            if (textWidth > maxWidth) {
+            if (textWidth > maxWidth || qWidth > maxWidth) {
                 textArea.setSize(new Dimension(maxWidth, Short.MAX_VALUE));
                 Dimension d = textArea.getPreferredSize();
-                return new Dimension(maxWidth, d.height);
+                return new Dimension(maxWidth, d.height + qHeight);
             } else {
                 Dimension d = textArea.getPreferredSize();
-                return new Dimension(Math.max(d.width, 40), d.height);
+                return new Dimension(Math.max(Math.max(d.width, qWidth), 48), d.height + qHeight);
             }
         }
 
