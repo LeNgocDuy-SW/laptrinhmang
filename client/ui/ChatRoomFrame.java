@@ -6,6 +6,7 @@ import common.ChatGroup;
 import common.MessagePacket;
 import common.Protocol;
 import common.User;
+import java.io.File;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
@@ -16,7 +17,9 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * ChatRoomFrame: Màn hình giao diện chính chuẩn thiết kế Dribbble 3 cột.
@@ -42,6 +45,9 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
 
     // Danh sách nhóm mà người dùng này đã mở khóa bằng mã
     private final Set<String> unlockedGroups = new HashSet<>();
+
+    // Bộ đếm tin nhắn chưa đọc cho từng nhóm (chữ thường để so khớp an toàn)
+    private final Map<String, Integer> unreadGroupCounts = new ConcurrentHashMap<>();
 
     // Danh sách dữ liệu
     private List<User> onlineUsers = new ArrayList<>();
@@ -523,9 +529,19 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         this.privateChatTarget = null;
         clearReplyState();
 
+        // Xóa thông báo tin nhắn chưa đọc của nhóm vừa chọn
+        unreadGroupCounts.put(groupName.toLowerCase(), 0);
+        if ("Friends & Family".equalsIgnoreCase(groupName)) {
+            if (favouritesCard != null) favouritesCard.setUnreadCount(0);
+        }
+
         favouritesCard.setSelected("Friends & Family".equalsIgnoreCase(groupName));
         for (GroupItemPanel g : groupPanels) {
-            g.setSelected(g.getGroupName().equalsIgnoreCase(groupName));
+            boolean isThis = g.getGroupName().equalsIgnoreCase(groupName);
+            g.setSelected(isThis);
+            if (isThis) {
+                g.setBadgeCount(0);
+            }
         }
 
         lblChatTitle.setText(groupName);
@@ -829,7 +845,61 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         }
         tabs.addTab("😊 Icon", emojiGrid);
 
-        // Tab 2: 12 Sticker sinh động gửi trực tiếp
+        // Tab 2: Sticker Hoạt Hình Messenger (Pusheen Cat)
+        String[][] pusheenStickers = {
+                {"web/stickers/pusheen/144884739019126.gif", "Chào bạn"},
+                {"web/stickers/pusheen/144884755685791.gif", "Thả tim"},
+                {"web/stickers/pusheen/144884765685790.gif", "Nhảy múa"},
+                {"web/stickers/pusheen/144884775685789.gif", "Cười tít"},
+                {"web/stickers/pusheen/144884792352454.gif", "Làm việc"},
+                {"web/stickers/pusheen/144884815685785.gif", "Ngủ khò"},
+                {"web/stickers/pusheen/144884825685784.gif", "Thả like"},
+                {"web/stickers/pusheen/144884835685783.gif", "Bắn tim"},
+                {"web/stickers/pusheen/144884852352448.gif", "Khóc hu hu"},
+                {"web/stickers/pusheen/144884879019112.gif", "Thùng giấy"},
+                {"web/stickers/pusheen/144884895685777.gif", "Trà sữa"},
+                {"web/stickers/pusheen/144884905685776.gif", "Cực ngầu"}
+        };
+        JPanel pusheenGrid = new JPanel(new GridLayout(3, 4, 6, 6));
+        pusheenGrid.setBackground(Color.WHITE);
+        pusheenGrid.setBorder(new EmptyBorder(8, 8, 8, 8));
+
+        for (String[] st : pusheenStickers) {
+            ImageIcon icon = null;
+            try {
+                File f = new File(st[0]);
+                if (f.exists()) {
+                    icon = new ImageIcon(f.getAbsolutePath());
+                } else {
+                    File f2 = new File("client/" + st[0].replace("web/", ""));
+                    if (f2.exists()) icon = new ImageIcon(f2.getAbsolutePath());
+                }
+            } catch (Exception ignored) {}
+
+            JButton sBtn;
+            if (icon != null && icon.getIconWidth() > 0) {
+                Image scaled = icon.getImage().getScaledInstance(38, 38, Image.SCALE_SMOOTH);
+                sBtn = new JButton(new ImageIcon(scaled));
+            } else {
+                sBtn = new JButton(st[1]);
+            }
+            sBtn.setToolTipText(st[1]);
+            sBtn.setBackground(new Color(248, 250, 252));
+            sBtn.setFocusPainted(false);
+            sBtn.setBorder(BorderFactory.createLineBorder(new Color(226, 232, 240), 1));
+            sBtn.setPreferredSize(new Dimension(58, 52));
+            sBtn.setCursor(new Cursor(Cursor.HAND_CURSOR));
+            sBtn.addActionListener(e -> {
+                sendFormattedContent("[[STICKER|" + st[0] + "|" + st[1] + "]]");
+                pickerPopup.setVisible(false);
+                txtChatInput.requestFocus();
+            });
+            pusheenGrid.add(sBtn);
+        }
+        tabs.insertTab("🐱 Pusheen", null, pusheenGrid, "Sticker hoạt hình Pusheen", 0);
+        tabs.setSelectedIndex(0);
+
+        // Tab 3: 12 Sticker cảm xúc nhanh
         String[][] stickers = {
                 {"👋", "Xin chào!"}, {"😂", "Cười xỉu"}, {"❤️", "Yêu quá!"}, {"👍", "Quá chuẩn"},
                 {"🔥", "Cháy quá"}, {"🚀", "Chốt đơn!"}, {"😢", "Buồn ghê"}, {"🌙", "Ngủ ngon"},
@@ -844,7 +914,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
             sBtn.setBackground(new Color(240, 249, 255));
             sBtn.setFocusPainted(false);
             sBtn.setBorder(BorderFactory.createLineBorder(new Color(191, 219, 254), 1));
-            sBtn.setPreferredSize(new Dimension(74, 54));
+            sBtn.setPreferredSize(new Dimension(64, 52));
             sBtn.setCursor(new Cursor(Cursor.HAND_CURSOR));
             sBtn.addActionListener(e -> {
                 sendFormattedContent("[[STICKER|" + st[0] + "|" + st[1] + "]]");
@@ -853,10 +923,10 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
             });
             stickerGrid.add(sBtn);
         }
-        tabs.addTab("🎨 Sticker", stickerGrid);
+        tabs.addTab("✨ Cảm xúc", stickerGrid);
 
         pickerPopup.add(tabs);
-        pickerPopup.show(btnSend, -250, -260);
+        pickerPopup.show(btnSend, -280, -270);
     }
 
     private void sendFileAttachment() {
@@ -902,6 +972,25 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
             boolean isMine = sender.equalsIgnoreCase(currentUsername);
             String time = timestamp != null ? timestamp : LocalDateTime.now().format(TIME_FMT);
             addMessageBubble(sender, role, time, content, isMine, false, false);
+            unreadGroupCounts.put(groupName.toLowerCase(), 0);
+        } else {
+            // Tin nhắn thuộc nhóm khác đang đóng -> Tăng số đếm tin chưa đọc và hiện huy hiệu ngoài danh sách
+            String key = groupName.toLowerCase();
+            int newCount = unreadGroupCounts.getOrDefault(key, 0) + 1;
+            unreadGroupCounts.put(key, newCount);
+
+            if ("Friends & Family".equalsIgnoreCase(groupName)) {
+                if (favouritesCard != null) {
+                    favouritesCard.setUnreadCount(newCount);
+                }
+            } else {
+                for (GroupItemPanel g : groupPanels) {
+                    if (g.getGroupName().equalsIgnoreCase(groupName)) {
+                        g.setBadgeCount(newCount);
+                        break;
+                    }
+                }
+            }
         }
     }
 
@@ -963,12 +1052,18 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
             if ("Friends & Family".equalsIgnoreCase(g.getGroupName())) continue;
             userGroupCount++;
             String sub = g.getMemberCount() + " Thành viên • 👑 " + (g.getCreator().isEmpty() ? "admin" : g.getCreator());
-            GroupItemPanel item = new GroupItemPanel(g.getGroupName(), sub, 0, () -> onSelectGroup(g.getGroupName()));
+            int unread = unreadGroupCounts.getOrDefault(g.getGroupName().toLowerCase(), 0);
+            GroupItemPanel item = new GroupItemPanel(g.getGroupName(), sub, unread, () -> onSelectGroup(g.getGroupName()));
             item.setSelected(g.getGroupName().equalsIgnoreCase(activeRoom));
             item.setAlignmentX(Component.LEFT_ALIGNMENT);
             groupPanels.add(item);
             groupsScrollContainer.add(item);
             groupsScrollContainer.add(Box.createVerticalStrut(4));
+        }
+
+        if (favouritesCard != null) {
+            int favUnread = unreadGroupCounts.getOrDefault("friends & family", 0);
+            favouritesCard.setUnreadCount(favUnread);
         }
 
         if (userGroupCount == 0) {

@@ -199,12 +199,20 @@
 
             <!-- Thanh trả lời tin nhắn (Reply Bar) + Chọn Emoji & Sticker + Nhập liệu -->
             <footer class="chat-input-wrapper">
-                <!-- Popup chọn Emoji & Sticker -->
+                <!-- Popup chọn Emoji & Sticker phong cách Messenger -->
                 <div id="emojiStickerPicker" class="emoji-sticker-popup" style="display: none;">
                     <div class="picker-tabs">
-                        <button type="button" id="tabBtnEmoji" class="picker-tab active" onclick="switchPickerTab('emoji')">😊 Icon / Emoji</button>
-                        <button type="button" id="tabBtnSticker" class="picker-tab" onclick="switchPickerTab('sticker')">🎨 Sticker</button>
+                        <button type="button" id="tabBtnEmoji" class="picker-tab active" onclick="switchPickerTab('emoji')">😊 Emoji</button>
+                        <button type="button" id="tabBtnSticker" class="picker-tab" onclick="switchPickerTab('sticker')">🐱 Sticker Messenger</button>
                     </div>
+
+                    <!-- Thanh chọn Gói Sticker như Messenger -->
+                    <div id="stickerPacksNav" class="sticker-packs-nav" style="display: none;">
+                        <button type="button" class="pack-tab-btn active" id="packBtnPusheen" onclick="switchStickerPack('pusheen')">🐱 Pusheen Cat</button>
+                        <button type="button" class="pack-tab-btn" id="packBtnPusheenEats" onclick="switchStickerPack('pusheen_eats')">🍕 Ăn Uống</button>
+                        <button type="button" class="pack-tab-btn" id="packBtnReactions" onclick="switchStickerPack('reactions')">✨ Cảm Xúc</button>
+                    </div>
+
                     <div id="pickerEmojiGrid" class="picker-grid emoji-grid"></div>
                     <div id="pickerStickerGrid" class="picker-grid sticker-grid" style="display: none;"></div>
                 </div>

@@ -9,7 +9,7 @@ javac -encoding UTF-8 -cp ".;lib/*" common/*.java server/*.java server/db/*.java
 
 echo.
 echo [1/2] Dang dong goi chat_client.jar...
-jar cfe chat_client.jar client.ClientMain client/*.class client/network/*.class client/ui/*.class common/*.class
+jar cfe chat_client.jar client.ClientMain client/*.class client/network/*.class client/ui/*.class -C client stickers common/*.class
 
 echo.
 echo [2/2] Dang dong goi chat_server.jar...

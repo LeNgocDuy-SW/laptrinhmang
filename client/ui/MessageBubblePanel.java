@@ -5,6 +5,8 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.awt.geom.RoundRectangle2D;
+import java.io.File;
+import java.net.URL;
 import java.util.function.BiConsumer;
 
 /**
@@ -171,16 +173,63 @@ public class MessageBubblePanel extends JPanel {
     }
 
     /**
-     * StickerBox: Hiển thị Sticker lớn sinh động
+     * StickerBox: Hiển thị Sticker lớn sinh động (hỗ trợ cả ảnh GIF hoạt họa như Messenger và Emoji)
      */
     private static class StickerBox extends JPanel {
         public StickerBox(String icon, String label, String replySender, String replySnippet) {
             setOpaque(false);
             setLayout(new BorderLayout(0, 4));
-            setBorder(new EmptyBorder(8, 14, 8, 14));
+            setBorder(new EmptyBorder(4, 10, 4, 10));
 
             if (replySender != null) {
                 add(createQuoteBox(replySender, replySnippet), BorderLayout.NORTH);
+            }
+
+            boolean isImage = icon.endsWith(".gif") || icon.endsWith(".png") || icon.endsWith(".webp") || icon.endsWith(".jpg")
+                    || icon.contains("stickers/") || icon.startsWith("http://") || icon.startsWith("https://");
+
+            if (isImage) {
+                ImageIcon imgIcon = null;
+                try {
+                    String clean = icon.startsWith("/") ? icon.substring(1) : icon;
+                    File f1 = new File(clean);
+                    File f2 = new File("web/" + clean);
+                    File f3 = new File("client/" + clean);
+                    if (f1.exists()) {
+                        imgIcon = new ImageIcon(f1.getAbsolutePath());
+                    } else if (f2.exists()) {
+                        imgIcon = new ImageIcon(f2.getAbsolutePath());
+                    } else if (f3.exists()) {
+                        imgIcon = new ImageIcon(f3.getAbsolutePath());
+                    } else if (icon.startsWith("http://") || icon.startsWith("https://")) {
+                        imgIcon = new ImageIcon(new URL(icon));
+                    } else {
+                        URL res = MessageBubblePanel.class.getResource("/" + clean);
+                        if (res != null) imgIcon = new ImageIcon(res);
+                    }
+                } catch (Exception ignored) {}
+
+                if (imgIcon != null && imgIcon.getIconWidth() > 0) {
+                    JLabel lblImg = new JLabel(imgIcon);
+                    lblImg.setToolTipText(label != null ? label : "Sticker");
+                    lblImg.setCursor(new Cursor(Cursor.HAND_CURSOR));
+
+                    if (label != null && !label.isEmpty() && !label.equalsIgnoreCase("Sticker")) {
+                        JPanel imgBox = new JPanel(new BorderLayout(0, 2));
+                        imgBox.setOpaque(false);
+                        imgBox.add(lblImg, BorderLayout.CENTER);
+
+                        JLabel lblCap = new JLabel(label, JLabel.CENTER);
+                        lblCap.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+                        lblCap.setForeground(new Color(100, 116, 139));
+                        imgBox.add(lblCap, BorderLayout.SOUTH);
+
+                        add(imgBox, BorderLayout.CENTER);
+                    } else {
+                        add(lblImg, BorderLayout.CENTER);
+                    }
+                    return;
+                }
             }
 
             JPanel card = new JPanel(new BorderLayout(0, 2)) {

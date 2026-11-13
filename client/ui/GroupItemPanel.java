@@ -13,7 +13,7 @@ import java.awt.geom.RoundRectangle2D;
 public class GroupItemPanel extends JPanel {
     private final String groupName;
     private final String subtitle;
-    private final int badgeCount;
+    private int badgeCount;
     private boolean isSelected = false;
     private boolean isHover = false;
     private final Runnable onClick;
@@ -53,6 +53,15 @@ public class GroupItemPanel extends JPanel {
         repaint();
     }
 
+    public void setBadgeCount(int badgeCount) {
+        this.badgeCount = badgeCount;
+        repaint();
+    }
+
+    public int getBadgeCount() {
+        return badgeCount;
+    }
+
     public String getGroupName() {
         return groupName;
     }
@@ -74,6 +83,10 @@ public class GroupItemPanel extends JPanel {
             g2.draw(new RoundRectangle2D.Float(4, 4, w - 8, h - 8, 14, 14));
         } else if (isHover) {
             g2.setColor(new Color(243, 244, 246));
+            g2.fill(new RoundRectangle2D.Float(4, 4, w - 8, h - 8, 14, 14));
+        } else if (badgeCount > 0) {
+            // Nền nhạt báo hiệu có tin chưa đọc
+            g2.setColor(new Color(254, 242, 242)); // Hồng/đỏ rất nhạt
             g2.fill(new RoundRectangle2D.Float(4, 4, w - 8, h - 8, 14, 14));
         }
 
@@ -97,30 +110,43 @@ public class GroupItemPanel extends JPanel {
 
         // 2. Tên nhóm
         int textX = avX + avSize + 12;
-        g2.setColor(UIUtils.TEXT_DARK);
-        g2.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        if (badgeCount > 0) {
+            g2.setColor(new Color(15, 23, 42)); // Đậm hơn
+            g2.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        } else {
+            g2.setColor(UIUtils.TEXT_DARK);
+            g2.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        }
         g2.drawString(groupName, textX, avY + 18);
 
         // Subtitle
-        g2.setColor(UIUtils.TEXT_MUTED);
-        g2.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        g2.drawString(subtitle, textX, avY + 34);
-
-        // 3. Huy hiệu đỏ số tin nhắn mới
         if (badgeCount > 0) {
-            int bw = 20;
+            g2.setColor(new Color(225, 29, 72)); // Đỏ nổi bật
+            g2.setFont(new Font("Segoe UI", Font.BOLD, 11));
+            g2.drawString("💬 " + badgeCount + " tin nhắn mới", textX, avY + 34);
+        } else {
+            g2.setColor(UIUtils.TEXT_MUTED);
+            g2.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+            g2.drawString(subtitle, textX, avY + 34);
+        }
+
+        // 3. Huy hiệu đỏ số tin nhắn mới phong cách Messenger
+        if (badgeCount > 0) {
+            String bt = badgeCount > 99 ? "99+" : String.valueOf(badgeCount);
+            int bw = badgeCount > 9 ? 26 : 20;
             int bh = 20;
-            int bx = w - 24 - bw;
+            int bx = w - 16 - bw;
             int by = (h - bh) / 2;
 
             g2.setColor(UIUtils.BADGE_RED);
-            g2.fill(new Ellipse2D.Float(bx, by, bw, bh));
+            g2.fill(new RoundRectangle2D.Float(bx, by, bw, bh, 12, 12));
 
             g2.setColor(Color.WHITE);
             g2.setFont(new Font("Segoe UI", Font.BOLD, 10));
-            String bt = String.valueOf(badgeCount);
             FontMetrics bfm = g2.getFontMetrics();
-            g2.drawString(bt, bx + (bw - bfm.stringWidth(bt)) / 2, by + 14);
+            int btx = bx + (bw - bfm.stringWidth(bt)) / 2;
+            int bty = by + ((bh - bfm.getHeight()) / 2) + bfm.getAscent();
+            g2.drawString(bt, btx, bty);
         }
 
         g2.dispose();

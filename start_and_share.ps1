@@ -59,9 +59,24 @@ try {
 # 2. Khoi dong Cloudflare Tunnel (dung HTTP/2 de ket noi nhanh 2-3s, khong bi timeout QUIC)
 $cfExe = Join-Path $root "cloudflared.exe"
 if (-not (Test-Path $cfExe)) {
-    Write-Host "[LOI] Khong tim thay cloudflared.exe trong thu muc du an!" -ForegroundColor Red
-    Read-Host "Nhan Enter de thoat"
-    exit 1
+    $cmd = Get-Command "cloudflared.exe" -ErrorAction SilentlyContinue
+    if ($cmd) {
+        $cfExe = $cmd.Source
+    } else {
+        Write-Host "[THONG BAO] Chua co cloudflared.exe. Dang tu dong tai ve (chi can tai 1 lan duy nhat)..." -ForegroundColor Yellow
+        $downloadUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+        try {
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls13
+            $progressPreference = 'SilentlyContinue'
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $cfExe -UseBasicParsing
+            Write-Host "            -> Da tai xong cloudflared.exe!" -ForegroundColor Green
+        } catch {
+            Write-Host "[LOI] Khong the tu dong tai cloudflared.exe: $_" -ForegroundColor Red
+            Write-Host "Ban co the tai truc tiep tu link: $downloadUrl va dat vao thu muc du an." -ForegroundColor Yellow
+            Read-Host "Nhan Enter de thoat"
+            exit 1
+        }
+    }
 }
 
 $logErr = Join-Path $root "cf_tunnel.log"

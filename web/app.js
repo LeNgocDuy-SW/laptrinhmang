@@ -15,7 +15,8 @@ const state = {
     isRegisterMode: false,
     renderedMessages: new Set(), // Dùng để chống trùng lặp tin nhắn
     replyTarget: null,           // { sender, snippet }
-    activeGroupInfo: null        // Dữ liệu chi tiết thành viên & Trưởng nhóm
+    activeGroupInfo: null,       // Dữ liệu chi tiết thành viên & Trưởng nhóm
+    unreadCounts: {}             // Quản lý số tin nhắn chưa đọc từng nhóm (chữ thường)
 };
 
 const SESSION_STORAGE_KEY = "cloud_chat_session";
@@ -237,6 +238,14 @@ function handleIncomingEvent(data) {
                 }
                 state.renderedMessages.add(sig);
                 appendMessageBubble(data.sender, data.role, data.timestamp, data.content, data.sender === state.currentUser);
+                state.unreadCounts[(data.groupName || "").toLowerCase()] = 0;
+                updateUnreadBadges();
+            } else {
+                // Tin nhắn thuộc nhóm khác đang đóng -> Tăng số tin chưa đọc và phát chuông thông báo
+                const key = (data.groupName || "").toLowerCase();
+                state.unreadCounts[key] = (state.unreadCounts[key] || 0) + 1;
+                updateUnreadBadges();
+                playNotifySound();
             }
             break;
         case "NEW_PRIVATE_MSG":
@@ -330,8 +339,10 @@ function renderGroupsList() {
         if (g.name === "Friends & Family") return;
         userGroupCount++;
 
+        const count = state.unreadCounts[(g.name || "").toLowerCase()] || 0;
+        const badgeHtml = count > 0 ? `<span class="group-unread-badge">${count > 99 ? '99+' : count}</span>` : '';
         const item = document.createElement("div");
-        item.className = `group-item ${state.activeRoom === g.name ? "active" : ""}`;
+        item.className = `group-item ${state.activeRoom === g.name ? "active" : ""} ${count > 0 ? "has-unread" : ""}`;
         item.onclick = () => selectGroup(g.name);
 
         const initial = g.name.substring(0, 1).toUpperCase();
@@ -339,8 +350,9 @@ function renderGroupsList() {
             <div class="group-icon-circle">${initial}</div>
             <div class="group-meta">
                 <span class="group-name">${escapeHtml(g.name)}</span>
-                <span class="group-desc">👥 ${g.memberCount} Thành viên • 👑 ${escapeHtml(g.creator || "admin")}</span>
+                <span class="group-desc">${count > 0 ? `💬 <b style="color:#ef4444">${count} tin nhắn mới</b>` : `👥 ${g.memberCount} Thành viên • 👑 ${escapeHtml(g.creator || "admin")}`}</span>
             </div>
+            ${badgeHtml}
         `;
         container.appendChild(item);
     });
@@ -348,6 +360,70 @@ function renderGroupsList() {
     if (userGroupCount === 0) {
         container.innerHTML = `<div style="font-size:12px;color:#94a3b8;padding:8px 6px;font-style:italic;">Chưa tham gia nhóm nào.<br>Bấm <b>+</b> hoặc <b>Tham Gia Nhóm</b> để nhập mã!</div>`;
     }
+
+    updateUnreadBadges();
+}
+
+function updateUnreadBadges() {
+    // 1. Cập nhật thẻ Favourites Card ("Friends & Family")
+    const favCount = state.unreadCounts["friends & family"] || 0;
+    const favBadge = document.getElementById("favBadge");
+    if (favBadge) {
+        if (favCount > 0) {
+            favBadge.style.display = "inline-flex";
+            favBadge.innerText = favCount > 99 ? "99+" : favCount;
+        } else {
+            favBadge.style.display = "none";
+        }
+    }
+
+    // 2. Cập nhật các nhóm trong danh sách
+    const container = document.getElementById("groupsContainer");
+    if (!container) return;
+    const items = container.querySelectorAll(".group-item");
+    items.forEach(item => {
+        const nameEl = item.querySelector(".group-name");
+        if (!nameEl) return;
+        const gName = nameEl.innerText.trim();
+        const count = state.unreadCounts[gName.toLowerCase()] || 0;
+        let badgeEl = item.querySelector(".group-unread-badge");
+        let descEl = item.querySelector(".group-desc");
+
+        if (count > 0) {
+            item.classList.add("has-unread");
+            if (!badgeEl) {
+                badgeEl = document.createElement("span");
+                badgeEl.className = "group-unread-badge";
+                item.appendChild(badgeEl);
+            }
+            badgeEl.innerText = count > 99 ? "99+" : count;
+            badgeEl.style.display = "inline-flex";
+            if (descEl) descEl.innerHTML = `💬 <b style="color:#ef4444">${count} tin nhắn mới</b>`;
+        } else {
+            item.classList.remove("has-unread");
+            if (badgeEl) badgeEl.style.display = "none";
+            const grp = state.groups.find(x => x.name.toLowerCase() === gName.toLowerCase());
+            if (descEl && grp) {
+                descEl.innerHTML = `👥 ${grp.memberCount} Thành viên • 👑 ${escapeHtml(grp.creator || "admin")}`;
+            }
+        }
+    });
+}
+
+function playNotifySound() {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.08); // A5
+        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.3);
+    } catch (e) {}
 }
 
 function openJoinGroupByCodeModal() {
@@ -370,9 +446,11 @@ function selectGroup(groupName) {
     }
 
     state.activeRoom = groupName;
+    state.unreadCounts[(groupName || "").toLowerCase()] = 0;
     saveSession();
     closeMobileDrawers();
     cancelReply();
+    updateUnreadBadges();
     document.getElementById("favCard").classList.toggle("active", groupName === "Friends & Family");
     document.getElementById("activeChatTitle").innerText = groupName;
     document.getElementById("rightGroupTitle").innerText = groupName;
@@ -600,9 +678,19 @@ function appendMessageBubble(sender, role, time, content, isMine) {
         ? `<div class="msg-quote-box"><b>↩ @${escapeHtml(replySender)}:</b> ${escapeHtml(replySnippet.length > 48 ? replySnippet.substring(0, 48) + "..." : replySnippet)}</div>`
         : "";
 
-    const bodyHtml = stickerIcon
-        ? `${quoteHtml}<div class="msg-sticker-card"><span class="msg-sticker-emoji">${escapeHtml(stickerIcon)}</span><span class="msg-sticker-label">${escapeHtml(stickerLabel)}</span></div>`
-        : `<div class="msg-bubble">${quoteHtml}${escapeHtml(mainContent)}</div>`;
+    let bodyHtml = `<div class="msg-bubble">${quoteHtml}${escapeHtml(mainContent)}</div>`;
+    if (stickerIcon) {
+        const isImage = stickerIcon.endsWith(".gif") || stickerIcon.endsWith(".png") || stickerIcon.endsWith(".webp") || stickerIcon.includes("stickers/") || stickerIcon.startsWith("http");
+        if (isImage) {
+            let src = stickerIcon;
+            if (!src.startsWith("http://") && !src.startsWith("https://") && !src.startsWith("/")) {
+                src = "/" + src;
+            }
+            bodyHtml = `${quoteHtml}<div class="msg-sticker-wrapper"><img class="msg-sticker-img" src="${src}" alt="${escapeHtml(stickerLabel)}" title="${escapeHtml(stickerLabel)}" loading="lazy" /></div>`;
+        } else {
+            bodyHtml = `${quoteHtml}<div class="msg-sticker-card"><span class="msg-sticker-emoji">${escapeHtml(stickerIcon)}</span><span class="msg-sticker-label">${escapeHtml(stickerLabel)}</span></div>`;
+        }
+    }
 
     row.innerHTML = `
         <div class="msg-avatar" style="${isMine ? 'background:#3b82f6;' : 'background:#94a3b8;'}">${initial}</div>
@@ -763,6 +851,73 @@ function leaderDeleteGroup() {
 // 6. EMOJI & STICKER PICKER + MODALS + UTILITIES
 // ==========================================================================
 
+const STICKER_PACKS = {
+    pusheen: [
+        { path: "/stickers/pusheen/144884739019126.gif", label: "Vẫy tay chào" },
+        { path: "/stickers/pusheen/144884755685791.gif", label: "Thả tim yêu" },
+        { path: "/stickers/pusheen/144884765685790.gif", label: "Nhảy nhót" },
+        { path: "/stickers/pusheen/144884775685789.gif", label: "Cười tít mắt" },
+        { path: "/stickers/pusheen/144884792352454.gif", label: "Gõ phím chăm" },
+        { path: "/stickers/pusheen/144884805685786.gif", label: "Ăn mì ramen" },
+        { path: "/stickers/pusheen/144884815685785.gif", label: "Khò khò ngủ" },
+        { path: "/stickers/pusheen/144884825685784.gif", label: "Thả like chuẩn" },
+        { path: "/stickers/pusheen/144884835685783.gif", label: "Bắn tim chéo" },
+        { path: "/stickers/pusheen/144884852352448.gif", label: "Khóc hu hu" },
+        { path: "/stickers/pusheen/144884865685780.gif", label: "Bánh donut ngon" },
+        { path: "/stickers/pusheen/144884879019112.gif", label: "Chui thùng giấy" },
+        { path: "/stickers/pusheen/144884895685777.gif", label: "Trà sữa boba" },
+        { path: "/stickers/pusheen/144884905685776.gif", label: "Đeo kính ngầu" },
+        { path: "/stickers/pusheen/144884925685774.gif", label: "Hốt hoảng" },
+        { path: "/stickers/pusheen/144884955685771.gif", label: "Hát ca vui vẻ" },
+        { path: "/stickers/pusheen/144884992352434.gif", label: "Cười ngoác" },
+        { path: "/stickers/pusheen/144885022352431.gif", label: "Đập tay High 5" },
+        { path: "/stickers/pusheen/144885035685763.gif", label: "Hộp quà xinh" },
+        { path: "/stickers/pusheen/144885045685762.gif", label: "Đắp chăn ngủ" },
+        { path: "/stickers/pusheen/144885055685761.gif", label: "Ôm tim rung" },
+        { path: "/stickers/pusheen/144885069019093.gif", label: "Giận dỗi" },
+        { path: "/stickers/pusheen/144885089019091.gif", label: "Tiệc chúc mừng" },
+        { path: "/stickers/pusheen/144885099019090.gif", label: "Vỗ tay khen" }
+    ],
+    pusheen_eats: [
+        { path: "/stickers/pusheen_eats/554423661312155.gif", label: "Bánh pizza" },
+        { path: "/stickers/pusheen_eats/554423671312154.gif", label: "Ăn cây kem" },
+        { path: "/stickers/pusheen_eats/554423684645486.gif", label: "Uống cà phê" },
+        { path: "/stickers/pusheen_eats/554423694645485.gif", label: "Bánh kem ngọt" },
+        { path: "/stickers/pusheen_eats/554423717978816.gif", label: "Nấu ăn ngon" },
+        { path: "/stickers/pusheen_eats/554423744645480.gif", label: "Tách trà ấm" },
+        { path: "/stickers/pusheen_eats/554423757978812.gif", label: "Burger kẹp" },
+        { path: "/stickers/pusheen_eats/554423771312144.gif", label: "Bắp rang bơ" },
+        { path: "/stickers/pusheen_eats/554423787978809.gif", label: "Đĩa sushi" },
+        { path: "/stickers/pusheen_eats/554423801312141.gif", label: "Khoai tây chiên" },
+        { path: "/stickers/pusheen_eats/554423821312139.gif", label: "Lon nước ngọt" },
+        { path: "/stickers/pusheen_eats/554423831312138.gif", label: "Dưa hấu mát" },
+        { path: "/stickers/pusheen_eats/554423847978803.gif", label: "Bánh quy nóng" },
+        { path: "/stickers/pusheen_eats/554423861312135.gif", label: "Kẹo mút tròn" },
+        { path: "/stickers/pusheen_eats/554423881312133.gif", label: "Mì spaghetti" },
+        { path: "/stickers/pusheen_eats/554423891312132.gif", label: "Đói cồn cào" },
+        { path: "/stickers/pusheen_eats/554423914645463.gif", label: "Bánh taco giòn" },
+        { path: "/stickers/pusheen_eats/554423931312128.gif", label: "Hộp cookie" },
+        { path: "/stickers/pusheen_eats/554423944645460.gif", label: "Chảy dãi thèm" },
+        { path: "/stickers/pusheen_eats/554423957978792.gif", label: "No tròn bụng" }
+    ],
+    reactions: [
+        { icon: "👍", label: "Like chuẩn" },
+        { icon: "❤️", label: "Yêu quá" },
+        { icon: "😂", label: "Cười té ghế" },
+        { icon: "🔥", label: "Cháy phố" },
+        { icon: "🎉", label: "Chúc mừng" },
+        { icon: "🤝", label: "Hợp tác" },
+        { icon: "👏", label: "Vỗ tay" },
+        { icon: "🚀", label: "Chốt đơn" },
+        { icon: "😢", label: "Buồn thiu" },
+        { icon: "👀", label: "Hóng hớt" },
+        { icon: "⭐", label: "10 điểm" },
+        { icon: "💯", label: "Tuyệt đối" }
+    ]
+};
+
+let currentStickerPack = "pusheen";
+
 function initEmojiStickerPicker() {
     const emojis = [
         "😀", "😂", "🥹", "😍", "🥰", "😎",
@@ -771,54 +926,71 @@ function initEmojiStickerPicker() {
         "❤️", "💔", "🔥", "⭐", "🎉", "🚀",
         "💯", "👀", "☕", "🍕", "🎵", "✨"
     ];
-    const stickers = [
-        { icon: "👋", label: "Xin chào!" },
-        { icon: "😂", label: "Cười xỉu" },
-        { icon: "❤️", label: "Yêu quá!" },
-        { icon: "👍", label: "Quá chuẩn" },
-        { icon: "🔥", label: "Cháy quá" },
-        { icon: "🚀", label: "Chốt đơn!" },
-        { icon: "😢", label: "Buồn ghê" },
-        { icon: "🌙", label: "Ngủ ngon" },
-        { icon: "🙏", label: "Cảm ơn!" },
-        { icon: "⭐", label: "Tuyệt vời" },
-        { icon: "👀", label: "Hóng biến" },
-        { icon: "🎉", label: "Chúc mừng" }
-    ];
 
     const eGrid = document.getElementById("pickerEmojiGrid");
-    eGrid.innerHTML = "";
-    emojis.forEach(emo => {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.className = "emoji-item-btn";
-        b.innerText = emo;
-        b.onclick = () => {
-            const input = document.getElementById("txtChatMessage");
-            input.value += emo;
-            document.getElementById("emojiStickerPicker").style.display = "none";
-            input.focus();
-        };
-        eGrid.appendChild(b);
-    });
+    if (eGrid) {
+        eGrid.innerHTML = "";
+        emojis.forEach(emo => {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = "emoji-item-btn";
+            b.innerText = emo;
+            b.onclick = () => {
+                const input = document.getElementById("txtChatMessage");
+                input.value += emo;
+                document.getElementById("emojiStickerPicker").style.display = "none";
+                input.focus();
+            };
+            eGrid.appendChild(b);
+        });
+    }
 
+    renderStickerPack(currentStickerPack);
+}
+
+function renderStickerPack(packName) {
+    currentStickerPack = packName;
     const sGrid = document.getElementById("pickerStickerGrid");
+    if (!sGrid) return;
     sGrid.innerHTML = "";
-    stickers.forEach(st => {
+
+    const list = STICKER_PACKS[packName] || STICKER_PACKS.pusheen;
+    list.forEach(st => {
         const b = document.createElement("button");
         b.type = "button";
         b.className = "sticker-item-btn";
-        b.innerHTML = `<span>${st.icon}</span><span>${st.label}</span>`;
-        b.onclick = () => {
-            document.getElementById("emojiStickerPicker").style.display = "none";
-            sendPayloadContent(`[[STICKER|${st.icon}|${st.label}]]`);
-        };
+        b.title = st.label;
+
+        if (st.path) {
+            b.innerHTML = `<img src="${st.path}" alt="${st.label}" loading="lazy" />`;
+            b.onclick = () => {
+                document.getElementById("emojiStickerPicker").style.display = "none";
+                sendPayloadContent(`[[STICKER|${st.path}|${st.label}]]`);
+            };
+        } else {
+            b.innerHTML = `<span>${st.icon}</span><span>${st.label}</span>`;
+            b.onclick = () => {
+                document.getElementById("emojiStickerPicker").style.display = "none";
+                sendPayloadContent(`[[STICKER|${st.icon}|${st.label}]]`);
+            };
+        }
         sGrid.appendChild(b);
     });
 }
 
+function switchStickerPack(packName) {
+    document.querySelectorAll(".pack-tab-btn").forEach(btn => btn.classList.remove("active"));
+    const activeBtn = document.getElementById(
+        packName === "pusheen" ? "packBtnPusheen" :
+        packName === "pusheen_eats" ? "packBtnPusheenEats" : "packBtnReactions"
+    );
+    if (activeBtn) activeBtn.classList.add("active");
+    renderStickerPack(packName);
+}
+
 function toggleEmojiPicker() {
     const p = document.getElementById("emojiStickerPicker");
+    if (!p) return;
     p.style.display = p.style.display === "none" ? "block" : "none";
 }
 
@@ -826,8 +998,16 @@ function switchPickerTab(tab) {
     const isEmoji = tab === "emoji";
     document.getElementById("tabBtnEmoji").classList.toggle("active", isEmoji);
     document.getElementById("tabBtnSticker").classList.toggle("active", !isEmoji);
+
+    const nav = document.getElementById("stickerPacksNav");
+    if (nav) nav.style.display = isEmoji ? "none" : "flex";
+
     document.getElementById("pickerEmojiGrid").style.display = isEmoji ? "grid" : "none";
     document.getElementById("pickerStickerGrid").style.display = isEmoji ? "none" : "grid";
+
+    if (!isEmoji) {
+        renderStickerPack(currentStickerPack);
+    }
 }
 
 function toggleMobileDrawer(side) {

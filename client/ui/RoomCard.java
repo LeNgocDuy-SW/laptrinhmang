@@ -54,6 +54,15 @@ public class RoomCard extends JPanel {
         repaint();
     }
 
+    public void setUnreadCount(int unreadCount) {
+        this.unreadCount = unreadCount;
+        repaint();
+    }
+
+    public int getUnreadCount() {
+        return unreadCount;
+    }
+
     public void setSelected(boolean sel) {
         this.isSelected = sel;
         repaint();
@@ -89,18 +98,23 @@ public class RoomCard extends JPanel {
         g2.setColor(UIUtils.TEXT_DARK);
         g2.drawString(title, 14, 28);
 
-        // Huy hiệu tin nhắn mới (chấm đỏ hoặc số)
+        // Huy hiệu tin nhắn mới (chấm đỏ hoặc số) phong cách Messenger
         if (unreadCount > 0) {
-            g2.setColor(UIUtils.BADGE_RED);
-            int badgeSize = 18;
-            int bx = w - 14 - badgeSize;
+            String bText = unreadCount > 99 ? "99+" : String.valueOf(unreadCount);
+            int bw = unreadCount > 9 ? 26 : 20;
+            int bh = 20;
+            int bx = w - 14 - bw;
             int by = 14;
-            g2.fill(new Ellipse2D.Float(bx, by, badgeSize, badgeSize));
+
+            g2.setColor(UIUtils.BADGE_RED);
+            g2.fill(new RoundRectangle2D.Float(bx, by, bw, bh, 12, 12));
+
             g2.setColor(Color.WHITE);
-            g2.setFont(new Font("Segoe UI", Font.BOLD, 11));
-            String bText = String.valueOf(unreadCount);
+            g2.setFont(new Font("Segoe UI", Font.BOLD, 10));
             FontMetrics bfm = g2.getFontMetrics();
-            g2.drawString(bText, bx + (badgeSize - bfm.stringWidth(bText)) / 2, by + 13);
+            int btx = bx + (bw - bfm.stringWidth(bText)) / 2;
+            int bty = by + ((bh - bfm.getHeight()) / 2) + bfm.getAscent();
+            g2.drawString(bText, btx, bty);
         }
 
         // 3. Hàng ngày tháng & Tag Online

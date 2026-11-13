@@ -833,6 +833,9 @@ public class WebChatServer implements RoomManager.WebEventListener {
             else if (path.endsWith(".json")) mime = "application/json; charset=UTF-8";
             else if (path.endsWith(".png")) mime = "image/png";
             else if (path.endsWith(".svg")) mime = "image/svg+xml";
+            else if (path.endsWith(".gif")) mime = "image/gif";
+            else if (path.endsWith(".webp")) mime = "image/webp";
+            else if (path.endsWith(".jpg") || path.endsWith(".jpeg")) mime = "image/jpeg";
 
             exchange.getResponseHeaders().set("Content-Type", mime);
             byte[] bytes = Files.readAllBytes(file.toPath());

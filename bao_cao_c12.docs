@@ -1,0 +1,313 @@
+# BÁO CÁO ĐỒ ÁN MÔN HỌC: LẬP TRÌNH MẠNG
+## ĐỀ TÀI: XÂY DỰNG HỆ THỐNG PHÒNG CHAT TRỰC TUYẾN ĐA NGƯỜI DÙNG (REAL-TIME MULTI-CLIENT CHAT SERVER)
+**Công nghệ & Kỹ thuật:** Java Socket TCP Đa luồng, Thread Pool (`ExecutorService`), HTTP + Server-Sent Events (SSE), SQLite WAL JDBC, SHA-256 + Salt, Java Swing Desktop GUI, Web Responsive SPA, Cloudflare Tunnel.
+
+---
+
+## MỤC LỤC
+1. [PHẦN 1: GIỚI THIỆU TỔNG QUAN](#phần-1-giới-thiệu-tổng-quan)
+   - 1.1. Bối cảnh và Lý do chọn đề tài
+   - 1.2. Mục tiêu nghiên cứu và xây dựng hệ thống
+   - 1.3. Đối tượng sử dụng và Phạm vi đồ án
+   - 1.4. Ý nghĩa khoa học và thực tiễn
+2. [PHẦN 2: PHÂN TÍCH HỆ THỐNG](#phần-2-phân-tích-hệ-thống)
+   - 2.1. Phân tích nhu cầu người dùng (User Requirements)
+   - 2.2. Phân tích bài toán kỹ thuật cốt lõi
+   - 2.3. Khảo sát & Đánh giá ưu - nhược điểm của các hệ thống tương tự
+   - 2.4. Đề xuất các tính năng mới và điểm sáng tạo của đồ án
+3. [PHẦN 3: THIẾT KẾ HỆ THỐNG & ỨNG DỤNG](#phần-3-thiết-kế-hệ-thống--ứng-dụng)
+   - 3.1. Sơ đồ kiến trúc tổng quan hệ thống (System Architecture)
+   - 3.2. Sơ đồ hoạt động các quy trình nghiệp vụ chính (Activity Diagrams)
+   - 3.3. Thiết kế chi tiết các chức năng phía Máy chủ (Server-Side Specifications)
+   - 3.4. Thiết kế chi tiết các chức năng phía Máy trạm (Client-Side Specifications)
+   - 3.5. Thiết kế tổ chức dữ liệu & Giao thức truyền tin (Data & Protocol Design)
+4. [PHẦN 4: CƠ CHẾ ĐA LUỒNG & BẢO MẬT CHUYÊN SÂU](#phần-4-cơ-chế-đa-luồng--bảo-mật-chuyên-sâu)
+   - 4.1. Điều phối đa luồng phía Server & Tránh lãng phí tài nguyên
+   - 4.2. Xử lý an toàn luồng phía Client & Chống đứng giao diện (UI Freeze)
+   - 4.3. Cơ chế đồng bộ hóa dữ liệu SQLite WAL đa luồng
+   - 4.4. Mô hình bảo mật xác thực danh tính SHA-256 with Salt
+5. [PHẦN 5: BẢNG PHÂN CHIA VAI TRÒ & TRÁCH NHIỆM 4 THÀNH VIÊN](#phần-5-bảng-phân-chia-vai-trò--trách-nhiệm-4-thành-viên)
+6. [PHẦN 6: BỘ CÂU HỎI VẤN ĐÁP & HƯỚNG DẪN TRẢ LỜI ĐẠT ĐIỂM TỐI ĐA](#phần-6-bộ-câu-hỏi-vấn-đáp--hướng-dẫn-trả-lời-đạt-điểm-tối-đa)
+
+---
+
+# PHẦN 1: GIỚI THIỆU TỔNG QUAN
+
+## 1.1. Bối cảnh và Lý do chọn đề tài
+Trong kỷ nguyên số hóa và làm việc từ xa, nhu cầu trao đổi thông tin liên lạc tức thời (Real-time Instant Messaging) đóng vai trò huyết mạch trong mọi tổ chức, trường học và doanh nghiệp. Hàng loạt nền tảng trò chuyện nổi tiếng như Facebook Messenger, Discord, Telegram hay Slack đã chứng minh sức mạnh của mô hình giao tiếp phân tán thời gian thực.
+
+Tuy nhiên, đối với sinh viên chuyên ngành Công nghệ thông tin và Kỹ thuật mạng, việc chỉ sử dụng các Framework bậc cao (High-level Frameworks) như Firebase, Socket.IO hoặc SignalR thường làm lu mờ đi bản chất hoạt động cốt lõi của tầng mạng (Transport Layer). Các câu hỏi nền tảng như:
+- Làm thế nào một byte dữ liệu được truyền qua luồng Socket TCP?
+- Hệ thống điều phối hàng chục kết nối đồng thời ra sao mà không gây tắc nghẽn CPU?
+- Giao thức tầng ứng dụng được tự thiết kế và phân tích cú pháp (parsing) như thế nào?
+- Làm sao đồng bộ dữ liệu thời gian thực giữa một ứng dụng Desktop Socket truyền thống với một ứng dụng Web hiện đại?
+
+Chính vì những lý do trên, nhóm đã quyết định lựa chọn đề tài **"Xây dựng hệ thống phòng chat trực tuyến đa người dùng (Real-time Multi-client Chat Server)"**. Đề tài được xây dựng từ nền tảng Socket cốt lõi bằng ngôn ngữ **Java**, kết hợp hài hòa giữa kiến trúc Client-Server truyền thống và các công nghệ giao tiếp hiện đại.
+
+## 1.2. Mục tiêu nghiên cứu và xây dựng hệ thống
+Đồ án đặt ra 2 nhóm mục tiêu trọng tâm:
+
+### A. Mục tiêu học thuật & Kỹ thuật mạng
+1. **Nắm vững kỹ thuật lập trình Socket TCP:** Hiện thực hóa cơ chế kết nối tin cậy thông qua `ServerSocket` và `Socket`, quản lý luồng dữ liệu hai chiều (`InputStream`, `OutputStream`).
+2. **Làm chủ kỹ thuật Đa luồng (Multi-threading) & Đồng thời (Concurrency):** Ứng dụng giải pháp Thread Pool (`ExecutorService`) để tối ưu việc tái sử dụng luồng, kết hợp các cấu trúc dữ liệu an toàn luồng (`ConcurrentHashMap`) nhằm loại trừ hoàn toàn nguy cơ tranh chấp dữ liệu (Race Condition) và khóa chết (Deadlock).
+3. **Tự thiết kế Giao thức tầng ứng dụng (Application Layer Protocol):** Xây dựng bộ giao thức truyền tin chuẩn chuỗi ký tự UTF-8 phân tách trường, có khả năng mở rộng linh hoạt cho nhiều loại bản tin khác nhau.
+4. **Quản trị dữ liệu quan hệ bền vững:** Tích hợp hệ quản trị CSDL nhúng **SQLite** với chế độ ghi nhật ký trước **WAL (Write-Ahead Logging)**, cho phép đọc/ghi đồng thời tốc độ cao.
+5. **Đảm bảo an toàn thông tin:** Ứng dụng giải pháp mã hóa băm mật khẩu chuẩn công nghiệp **SHA-256 kết hợp chuỗi Salt ngẫu nhiên**, chống lại các cuộc tấn công tra từ điển và bảng băm sẵn (Rainbow Table).
+
+### B. Mục tiêu sản phẩm & Ứng dụng thực tiễn
+1. **Hỗ trợ Đa nền tảng (Cross-platform):** Đồng thời phục vụ cả ứng dụng máy tính **Desktop Java Swing** và ứng dụng **Web Responsive** trên trình duyệt/điện thoại di động.
+2. **Cơ chế Nhóm chat linh hoạt & Mã định danh (PIN) độc nhất:** Người dùng có thể tự tạo phòng chat riêng và mời bạn bè tham gia nhanh chóng thông qua mã PIN bảo mật không trùng lặp.
+3. **Phân quyền người dùng chặt chẽ:** Tách bạch rõ ràng quyền hạn giữa Quản trị viên hệ thống (Admin), Trưởng nhóm chat (Group Leader) và Thành viên thông thường (User).
+4. **Trải nghiệm giao tiếp hiện đại:** Hỗ trợ tính năng Trích dẫn trả lời (Reply/Quote), bộ biểu tượng Emoji và kho **Sticker hoạt họa động (Animated GIF)** phong cách Facebook Messenger.
+5. **Khả năng chia sẻ Internet 1-Click:** Tích hợp Cloudflare Tunnel tự động mở cổng bảo mật HTTPS ra Internet mà không cần can thiệp mở cổng modem (Port Forwarding).
+
+## 1.3. Đối tượng sử dụng và Phạm vi đồ án
+- **Đối tượng hướng tới:** Các nhóm học tập, lớp học, câu lạc bộ hoặc các phòng ban nội bộ cần một hệ thống trao đổi thông tin thời gian thực gọn nhẹ, hoàn toàn tự chủ dữ liệu (Self-hosted), không bị phụ thuộc vào dịch vụ đám mây của bên thứ ba.
+- **Phạm vi hệ thống:**
+  - Triển khai theo mô hình tập trung hình sao (Star Topology) với một Server trung tâm lắng nghe cổng TCP `5000` (dành cho Desktop Client) và cổng Web HTTP/SSE `8080` (dành cho Web/Mobile Client).
+  - Hoạt động ổn định trên cả mạng cục bộ nội bộ (LAN / Wi-Fi) và mạng diện rộng công cộng (Internet qua Cloudflare Tunnel).
+
+## 1.4. Ý nghĩa khoa học và thực tiễn
+- **Về mặt khoa học:** Giúp sinh viên nắm vững nguyên lý hoạt động của các tầng giao thức trong mô hình OSI/TCP-IP, hiểu rõ sự khác biệt giữa giao tiếp liên tục hướng kết nối (Socket TCP Streams) và giao tiếp bán song công hướng sự kiện (HTTP REST + Server-Sent Events).
+- **Về mặt thực tiễn:** Tạo ra một sản phẩm phần mềm hoàn chỉnh, có tính ứng dụng thực tế cao, giao diện thẩm mỹ hiện đại, dễ dàng đóng gói thành các file `.jar` và bộ cài đặt chạy ngay trên mọi máy tính có cài đặt máy ảo Java (JVM).
+
+---
+
+# PHẦN 2: PHÂN TÍCH HỆ THỐNG
+
+## 2.1. Phân tích nhu cầu người dùng (User Requirements Analysis)
+1. **Nhóm nhu cầu Xác thực & Bảo mật danh tính:**
+   - Người dùng cần có tài khoản cá nhân để định danh trong phòng chat.
+   - Mật khẩu phải được bảo vệ tuyệt đối, không được lưu dạng văn bản thô.
+   - Hệ thống phải ngăn chặn hiện tượng 1 tài khoản đăng nhập đồng thời ở 2 nơi để tránh xung đột dữ liệu.
+2. **Nhóm nhu cầu Giao tiếp & Tương tác:**
+   - Nhắn tin tức thời với độ trễ tính bằng mili-giây.
+   - Phân loại rõ ràng: Tin nhắn phòng chung (Broadcast), Tin nhắn nhóm riêng tư và Tin nhắn riêng mật 1-1 (Unicast).
+   - Khả năng trích dẫn ngữ cảnh (Quote/Reply) giúp các cuộc thảo luận mạch lạc, không bị trôi tin.
+   - Nhu cầu biểu đạt cảm xúc sinh động qua Emoji và Sticker hoạt họa phong cách Facebook Messenger.
+3. **Nhóm nhu cầu Quản trị & Điều phối:**
+   - Người tạo nhóm phải có toàn quyền kiểm soát nhóm của mình (đổi mã PIN, mời/kick thành viên, cấm chat thành viên trong nhóm, xóa lịch sử, giải tán nhóm).
+   - Quản trị viên hệ thống (Admin) cần công cụ giám sát trực tiếp số lượng người online, lưu lượng tin nhắn, và có quyền xử lý các hành vi vi phạm chuẩn mực (Mute tạm thời, Kick ra khỏi server, Ban vĩnh viễn).
+4. **Nhóm nhu cầu Tiện ích & Truy cập đa nền tảng:**
+   - Không bị mất tin nhắn khi tắt máy (lịch sử trò chuyện phải được lưu trữ bền vững).
+   - Dễ dàng kết nối trên cả máy tính (giao diện Swing chuyên nghiệp) lẫn điện thoại (giao diện Web mượt mà không cần cài đặt phần mềm).
+
+## 2.2. Phân tích bài toán kỹ thuật cốt lõi
+
+### Bài toán 1: Xử lý đồng thời cao (High Concurrency & Multi-threading)
+- **Thách thức:** Mỗi kết nối Socket TCP chiếm giữ một kênh truyền dữ liệu liên tục. Nếu mỗi Client tạo một `new Thread()` riêng lẻ thì khi có 100 hay 1.000 Client kết nối, bộ nhớ Stack của JVM sẽ nhanh chóng cạn kiệt, dẫn đến lỗi kinh điển `java.lang.OutOfMemoryError: unable to create new native thread`, đồng thời CPU quá tải do chi phí chuyển đổi ngữ cảnh (Context Switching).
+- **Giải pháp kỹ thuật:** Ứng dụng mô hình **Thread Pool** thông qua `Executors.newCachedThreadPool()`. Server duy trì một hồ bơi luồng có khả năng tự động co giãn, tái sử dụng các luồng nhàn rỗi và tự động hủy các luồng không sử dụng sau 60 giây, giúp tối ưu hóa tuyệt đối việc sử dụng RAM và CPU.
+
+### Bài toán 2: Đồng bộ dữ liệu hai chiều giữa hai giao thức khác biệt (TCP Socket vs HTTP/SSE)
+- **Thách thức:** 
+  - Desktop Swing Client giao tiếp qua **TCP Socket thuần liên tục** (Stream-based), giữ kết nối mở lâu dài.
+  - Web Browser Client giao tiếp qua **giao thức HTTP không trạng thái (Stateless)**, không thể nhận trực tiếp byte TCP socket thô nếu không dùng WebSocket phức tạp.
+- **Giải pháp kỹ thuật:** Xây dựng lõi **Dual-Protocol Gateway** trong `ChatServer`. Máy chủ tích hợp sẵn module `WebChatServer` chạy cơ chế **Server-Sent Events (SSE)** tại endpoint `/api/stream`. Khi có tin nhắn từ Socket TCP, Server tự động đẩy qua hàng đợi SSE để bắn về Web Client; ngược lại, khi Web Client gửi tin qua HTTP POST `/api/send`, Server chuyển đổi gói tin sang giao thức Socket TCP để phát tới các Client Desktop. Cả hai thế giới được đồng bộ 100% thời gian thực.
+
+### Bài toán 3: Tranh chấp tài nguyên CSDL nhúng (Database Concurrency & Locking)
+- **Thách thức:** SQLite là CSDL nhúng (File-based DB). Ở chế độ mặc định (`journal_mode = DELETE`), mỗi khi có một thao tác Ghi (`INSERT/UPDATE`), toàn bộ file CSDL bị khóa độc quyền (Exclusive Lock), khiến các luồng Đọc (`SELECT`) bị nghẽn (Database Busy / Locked Exception).
+- **Giải pháp kỹ thuật:** Cấu hình SQLite hoạt động ở chế độ **Write-Ahead Logging (WAL)**:
+  ```sql
+  PRAGMA journal_mode=WAL;
+  PRAGMA busy_timeout=5000;
+  PRAGMA synchronous=NORMAL;
+  ```
+  Chế độ WAL ghi các thay đổi vào file log riêng biệt (`chat.db-wal`), cho phép **vô số luồng Đọc chạy song song cùng lúc với 1 luồng Ghi**, tăng hiệu năng truy xuất I/O lên gấp 5-10 lần.
+
+### Bài toán 4: Chống đứng giao diện người dùng (UI Freezing)
+- **Thách thức:** Trong Java Swing, nếu gọi lệnh đọc socket `in.readLine()` trực tiếp trên luồng giao diện chính (Event Dispatch Thread - EDT), toàn bộ cửa sổ sẽ bị treo cứng (Not Responding) trong lúc chờ dữ liệu từ mạng.
+- **Giải pháp kỹ thuật:** Áp dụng mô hình **Bất đồng bộ đa luồng**: Luồng giao diện EDT chỉ làm nhiệm vụ vẽ giao diện và bắt sự kiện bàn phím/chuột. Một luồng nền độc lập (`ServerListener`) liên tục chờ đọc dữ liệu từ Socket. Khi nhận được tin nhắn mới, `ServerListener` sử dụng phương thức an toàn `SwingUtilities.invokeLater(...)` để bàn giao tác vụ cập nhật giao diện về cho EDT, tuân thủ nguyên tắc Single-Thread Rule của Swing.
+
+### Bài toán 5: Bảo vệ mật khẩu người dùng
+- **Thách thức:** Lưu mật khẩu dạng thô (Plain-text) là lỗi bảo mật nghiêm trọng nhất. Kể cả khi băm bằng MD5 hay SHA-1 đơn thuần, kẻ tấn công vẫn dễ dàng tra cứu ngược qua các bảng băm sẵn (Rainbow Table).
+- **Giải pháp kỹ thuật:** Áp dụng giải pháp **SHA-256 kết hợp chuỗi Muối hệ thống bí mật (Salt)**:
+  Chuỗi băm = SHA-256(RawPassword + SystemSalt)
+  Đảm bảo chuỗi băm sinh ra luôn duy nhất, triệt tiêu hoàn toàn khả năng dò quét mật khẩu phổ biến.
+
+## 2.3. Khảo sát & Đánh giá ưu - nhược điểm của các hệ thống tương tự
+
+| Tiêu chí so sánh | IRC (Internet Relay Chat) | Facebook Messenger / Zalo | Hệ thống Node.js Socket.IO | **Hệ Thống Đồ Án Của Nhóm** |
+| :--- | :--- | :--- | :--- | :--- |
+| **Giao thức cốt lõi** | TCP Socket thuần dạng text | HTTP/2, WebSocket, MQTT | WebSocket / Polling | **TCP Socket Đa luồng + HTTP/SSE** |
+| **Kiến trúc dữ liệu** | Không lưu trữ lịch sử trên server | CSDL phân tán khổng lồ (Cassandra/MySQL) | MongoDB / Redis / PostgreSQL | **SQLite WAL File-based nhúng tự chứa** |
+| **Đa nền tảng** | Chủ yếu CLI / Desktop cổ điển | Mobile App, Web Browser | Web, Desktop Electron | **Desktop Swing Neumorphism + Web Mobile SPA** |
+| **Mức độ phụ thuộc** | Thấp, cần cài IRC Client | Hoàn toàn phụ thuộc Cloud Meta/VNG | Cần cài Node runtime và npm modules | **Độc lập 100%, chạy ngay trên JVM, không phụ thuộc** |
+| **Quản trị phòng chat** | Phân quyền Channel Op (`@`, `+`) | Nhóm chat, Trưởng nhóm | Tự lập trình tùy biến | **Hệ thống 2 tầng: Admin hệ thống + Trưởng nhóm PIN** |
+| **Trải nghiệm tương tác** | Chỉ hỗ trợ văn bản đơn thuần | Sticker, Emoji, Reply, Voice | Tùy biến theo code UI | **Hỗ trợ Reply, Emoji và 62+ Sticker GIF Messenger** |
+| **Triển khai ra Internet** | Cần IP tĩnh hoặc mở Port modem | Hạ tầng toàn cầu có sẵn | Cần thuê VPS / Cloud | **1-Click Cloudflare Tunnel tự động sinh link HTTPS** |
+
+## 2.4. Đề xuất các tính năng mới và điểm sáng tạo của đồ án
+1. **Cơ chế Nhóm chat bằng Mã định danh độc nhất (Group PIN Code):** Thay vì hiển thị danh sách phòng cố định gây rối mắt, mỗi người dùng có thể tự tạo nhóm chat riêng. Mỗi nhóm được cấp một **Mã PIN duy nhất** không trùng lặp (ví dụ `GR9823`). Thành viên chỉ cần bấm **🔑 Tham Gia Nhóm** và nhập mã PIN là vào thẳng nhóm.
+2. **Đặc quyền Trưởng nhóm tự động (Group Leadership):** Người tạo nhóm tự động sở hữu quyền Trưởng nhóm: được quyền **Đổi mã PIN nhóm**, **Kick thành viên khỏi nhóm**, **Chặn/Mở chặn tin nhắn trong nhóm**, **Xóa lịch sử trò chuyện nhóm** và **Giải tán nhóm**.
+3. **Kho Sticker Hoạt hình động chuẩn Messenger (Animated GIFs):** Tích hợp hơn **62 Animated GIF stickers** chính thức của Facebook Messenger (Gói Pusheen Cat, Gói Pusheen Ăn Uống, Gói Reactions). Cơ chế hiển thị tự động nhận diện và phát hoạt họa trên cả Web Browser lẫn App Desktop Swing.
+
+![Bộ sưu tập 62+ Sticker hoạt họa phong cách Messenger](docs_images/sticker_showcase.png)
+
+4. **Chia sẻ Internet 1-Click thông qua Cloudflare Tunnel:** Tích hợp script tự động kết nối **Cloudflare Tunnel (`cloudflared`)**, tự động sinh đường dẫn an toàn `https://[random].trycloudflare.com` và tự động copy vào clipboard để gửi qua Zalo/Messenger cho bạn bè mở trên điện thoại 4G.
+5. **Thông báo Tin nhắn Chưa đọc chuẩn Messenger (Unread Badge Notifications):** Tự động phát hiện khi có tin nhắn mới gửi đến các nhóm mà người dùng chưa mở xem. Hệ thống hiển thị huy hiệu đỏ nổi bật (`badgeCount`), in đậm tên nhóm, hiển thị số tin nhắn chưa đọc và phát chuông âm thanh trên cả Java Swing và Web SPA. Khi người dùng nhấp vào mở nhóm, huy hiệu sẽ tự động được xóa.
+
+---
+
+# PHẦN 3: THIẾT KẾ HỆ THỐNG VÀ ỨNG DỤNG
+
+## 3.1. Sơ đồ kiến trúc tổng quan hệ thống (System Architecture)
+Hệ thống được tổ chức thành 3 tầng:
+1. **Tầng Giao diện (Presentation Layer):**
+   - App Desktop Java Swing (Giao diện 3 cột: Groups, Messages, Members).
+   - Web Client Single Page Application (HTML5, CSS3 Neumorphism, Vanilla JS, Responsive Drawer Mobile).
+2. **Tầng Xử lý Nghiệp vụ & Mạng (Business & Network Layer):**
+   - Bộ điều phối TCP Socket (`ChatServer`, `ClientHandler`, `ExecutorService`).
+   - Bộ điều phối Web Gateway (`WebChatServer`, Server-Sent Events `/api/stream`, HTTP REST).
+   - Bộ não điều phối trung tâm (`RoomManager`, `ConcurrentHashMap`).
+   - Bảng điều khiển giám sát máy chủ (`ServerGUI`).
+3. **Tầng Dữ liệu Bền vững (Persistence Layer):**
+   - Lớp kết nối JDBC SQLite cấu hình WAL (`DatabaseConnection`).
+   - Các lớp Data Access Object (`UserDAO`, `GroupDAO`, `MessageDAO`).
+   - File cơ sở dữ liệu vật lý duy nhất: `chat.db`.
+
+![Sơ đồ kiến trúc tổng quan hệ thống (Star Topology)](docs_images/architecture_diagram.png)
+
+## 3.2. Sơ đồ hoạt động các quy trình nghiệp vụ chính
+
+![Sơ đồ quy trình hoạt động xác thực, tạo nhóm PIN & định tuyến tin nhắn](docs_images/activity_flow_diagram.png)
+
+### 1. Quy trình Xác thực Đăng nhập & Nạp dữ liệu ban đầu
+- Client gửi: `LOGIN|username|password`.
+- Server băm SHA-256 mật khẩu kèm Salt, truy vấn bảng `users`.
+- Kiểm tra tài khoản: Nếu sai mật khẩu hoặc bị Ban $\rightarrow$ trả về `LOGIN_RES|FAILED|lý_do`.
+- Kiểm tra đăng nhập trùng lặp: Nếu username đang có kết nối trong `RoomManager` $\rightarrow$ trả về `LOGIN_RES|FAILED|Tài khoản đang đăng nhập nơi khác`.
+- Thành công: Trả về `LOGIN_RES|SUCCESS|role|username`, đồng thời nạp danh sách nhóm của user, nạp 30 tin nhắn gần nhất và broadcast cập nhật danh sách online.
+
+### 2. Quy trình Tạo nhóm và Tham gia nhóm bằng Mã PIN
+- **Tạo nhóm:** Client gửi `CREATE_GROUP|groupName|groupCode`. Server kiểm tra mã PIN trong bảng `groups`. Nếu hợp lệ, lưu nhóm với role `Trưởng nhóm` cho user đó và broadcast danh sách nhóm.
+- **Tham gia nhóm:** Client gửi `JOIN_GROUP||groupCode`. Server tra cứu mã PIN. Nếu tồn tại, thêm user vào bảng `group_members`, nạp lịch sử tin nhắn nhóm đó và thông báo cho các thành viên trong nhóm.
+
+### 3. Quy trình Định tuyến Tin nhắn, Trích dẫn Reply & Gửi Sticker
+- Người dùng gửi nội dung: Text thường, Trích dẫn (`[[REPLY|user|snippet]]...`), hoặc Sticker (`[[STICKER|path|label]]`).
+- **Tin nhóm (`MSG_GROUP|groupName|content`):** Server kiểm tra Mute $\rightarrow$ Lưu vào SQLite $\rightarrow$ Broadcast tới toàn bộ Client TCP và đẩy SSE stream tới các Web Client trong nhóm.
+- **Tin riêng 1-1 (`MSG_PRIVATE|target|content`):** Server lưu tin loại `is_private=1` và gửi gói `NEW_PRIVATE_MSG` tới duy nhất 2 người (người gửi và người nhận).
+
+## 3.3. Thiết kế chi tiết các chức năng phía Máy chủ (Server-Side Specifications)
+1. **Lớp `ChatServer.java`:** Khởi tạo `ServerSocket(5000)`, quản lý Thread Pool `Executors.newCachedThreadPool()`, lắng nghe kết nối và điều phối sang `ClientHandler`. Đồng thời khởi động `WebChatServer` tại cổng `8080`.
+2. **Lớp `ClientHandler.java`:** Chạy trên một luồng riêng, quản lý luồng I/O với từng Client. Phân tích gói tin theo Header và gửi phản hồi an toàn luồng với phương thức `synchronized sendPacket()`.
+3. **Lớp `RoomManager.java`:** Bộ não quản trị tập trung:
+   - Lưu trữ danh sách Online: `ConcurrentHashMap<String, ClientHandler>`.
+   - Lưu trữ thời hạn cấm chat: `ConcurrentHashMap<String, Long>`.
+   - Điều phối Broadcast tin nhắn toàn phòng, tin nhắn nhóm, và Unicast 1-1.
+4. **Lớp `WebChatServer.java`:** Tích hợp máy chủ HTTP phục vụ tài nguyên Web (`web/index.html`, `style.css`, `app.js`, kho ảnh `.gif`), cung cấp endpoint SSE `/api/stream` và các API REST `/api/send`, `/api/login`, `/api/register`.
+5. **Tầng Database DAO:**
+   - `UserDAO`: Đăng nhập, đăng ký, băm SHA-256 + Salt, kiểm tra Ban/Active.
+   - `GroupDAO`: Tạo nhóm, kiểm tra mã PIN, thêm thành viên, giải tán nhóm.
+   - `MessageDAO`: Lưu trữ tin nhắn, nạp lại 30 tin gần nhất.
+6. **Lớp `ServerGUI.java`:** Giám sát trực tiếp số Client kết nối, xem log mạng chi tiết và cung cấp nút Kick cưỡng chế Client vi phạm.
+
+![Giao diện Server Monitor Dashboard giám sát trung tâm](docs_images/screenshot_server.png)
+
+## 3.4. Thiết kế chi tiết các chức năng phía Máy trạm (Client-Side Specifications)
+1. **Phân hệ Desktop Client (Java Swing):**
+   - `LoginFrame`: Giao diện xác thực tài khoản đăng nhập/đăng ký với hiệu ứng Neumorphism, kiểm tra tính hợp lệ dữ liệu trực quan.
+
+![Giao diện Đăng nhập / Đăng ký tài khoản Neumorphism](docs_images/screenshot_login.png)
+
+   - `SocketClient`: Tạo kết nối Socket TCP, mã hóa gửi gói tin lên Server.
+   - `ServerListener`: Luồng chạy ngầm độc lập chờ đọc `in.readLine()`, đẩy dữ liệu về giao diện thông qua `SwingUtilities.invokeLater(...)`.
+   - `ChatEventListener`: Interface callback đảm bảo phân tách hoàn toàn giữa tầng Mạng và tầng Giao diện.
+   - `ChatRoomFrame`: Thiết kế 3 cột hiện đại (Nhóm - Khung chat - Thành viên/Quản trị), khung chat hiển thị bong bóng chat, Reply quote và Sticker Pusheen hoạt họa.
+
+![Giao diện Phòng chat Messenger 3 cột, Bong bóng chat & Sticker Pusheen](docs_images/screenshot_chat.png)
+
+2. **Phân hệ Web Client (HTML5 / CSS3 / JavaScript SPA):**
+   - Ứng dụng trang đơn (SPA) không tải lại trang.
+   - Luồng sự kiện Server-Sent Events (`EventSource`) nhận tin nhắn đẩy thời gian thực từ Server.
+   - Giao diện Responsive Mobile UI: Tự động thu gọn thanh bên thành ngăn kéo trượt (`☰` và `👥`) khi mở trên điện thoại.
+
+## 3.5. Thiết kế tổ chức dữ liệu & Giao thức truyền tin
+
+### Bảng từ điển dữ liệu (Data Dictionary):
+1. **Bảng `users`:** `id` (INTEGER PK), `username` (TEXT UNIQUE), `password_hash` (TEXT), `role` (TEXT: ADMIN/USER), `is_banned` (INTEGER: 0/1), `created_at` (TEXT).
+2. **Bảng `groups`:** `id` (INTEGER PK), `group_name` (TEXT), `group_code` (TEXT UNIQUE - Mã PIN), `creator_username` (TEXT), `created_at` (TEXT).
+3. **Bảng `group_members`:** `id` (INTEGER PK), `group_id` (INTEGER FK), `username` (TEXT), `joined_at` (TEXT).
+4. **Bảng `messages`:** `id` (INTEGER PK), `group_name` (TEXT), `sender` (TEXT), `recipient` (TEXT), `content` (TEXT), `timestamp` (TEXT), `is_private` (INTEGER: 0/1).
+
+![Sơ đồ thực thể liên kết cơ sở dữ liệu (ERD - SQLite WAL)](docs_images/database_erd.png)
+
+### Cấu trúc gói tin Giao thức tầng ứng dụng:
+- Đăng nhập: `LOGIN|username|password` $\rightarrow$ `LOGIN_RES|SUCCESS|role|username` hoặc `LOGIN_RES|FAILED|lý_do`
+- Đăng ký: `REGISTER|username|password` $\rightarrow$ `REGISTER_RES|SUCCESS/FAILED|thông_báo`
+- Nhóm chat: `CREATE_GROUP|groupName|groupCode` / `JOIN_GROUP||groupCode` $\rightarrow$ `GROUP_LIST|...`
+- Tin nhắn: `MSG_GROUP|groupName|content` $\rightarrow$ `NEW_MSG|groupName|sender|role|time|content`
+- Tin nhắn riêng: `MSG_PRIVATE|target|content` $\rightarrow$ `NEW_PRIVATE_MSG|sender|target|time|content`
+- Lệnh quản trị nhóm: `GROUP_CMD|KICK/MUTE/SET_CODE/DELETE|groupName|target`
+- Lệnh quản trị hệ thống: `ADMIN_CMD|KICK/MUTE/BAN/ALERT|target|params`
+
+---
+
+# PHẦN 4: CƠ CHẾ ĐA LUỒNG & BẢO MẬT CHUYÊN SÂU
+
+## 4.1. Điều phối đa luồng phía Server & Tránh lãng phí tài nguyên
+1. **Luồng chấp nhận kết nối (`Server-Accept-Thread`):** Lệnh `serverSocket.accept()` chạy trên luồng nền độc lập, không block Server.
+2. **Quản lý luồng bằng Thread Pool (`ExecutorService`):** Sử dụng `Executors.newCachedThreadPool()`. Tái sử dụng các luồng xử lý và tự hủy luồng nhàn rỗi sau 60 giây, giúp tối ưu hiệu năng và khả năng mở rộng.
+3. **Cấu trúc dữ liệu an toàn luồng:** `ConcurrentHashMap` lưu trữ danh sách online và thời hạn mute; phương thức `sendPacket()` được bọc khối `synchronized` chống ghi đè xen kẽ.
+
+## 4.2. Xử lý an toàn luồng phía Client & Chống đứng giao diện (UI Freeze)
+- Luồng giao diện Swing (EDT) chỉ làm nhiệm vụ vẽ giao diện và bắt sự kiện.
+- Luồng ngầm `ServerListener` độc lập liên tục đọc `in.readLine()`. Khi có tin nhắn, chuyển giao dữ liệu sang EDT bằng `SwingUtilities.invokeLater(...)`.
+
+## 4.3. Cơ chế đồng bộ hóa dữ liệu SQLite WAL đa luồng
+Kích hoạt:
+```sql
+PRAGMA journal_mode=WAL;
+PRAGMA busy_timeout=5000;
+```
+Chế độ Write-Ahead Logging cho phép nhiều luồng Đọc và 1 luồng Ghi diễn ra đồng thời mà không khóa chặn lẫn nhau.
+
+## 4.4. Mô hình bảo mật xác thực danh tính SHA-256 with Salt
+Mật khẩu được ghép với chuỗi Salt bí mật hệ thống và băm bằng thuật toán SHA-256 tạo chuỗi hex 64 ký tự an toàn trước các cuộc tấn công Rainbow Table.
+
+---
+
+# PHẦN 5: BẢNG PHÂN CHIA VAI TRÒ & TRÁCH NHIỆM 4 THÀNH VIÊN
+
+| Thành viên | Vai trò phụ trách | Các lớp & Module xây dựng | Khối lượng công việc đã hoàn thành |
+| :--- | :--- | :--- | :--- |
+| **Thành viên 1** | **Core Server, Concurrency & Tích hợp** | `common/Protocol.java`<br>`server/ChatServer.java`<br>`server/ClientHandler.java`<br>`server/RoomManager.java`<br>`server/ServerMain.java`<br>`server/ui/ServerGUI.java` | 1. Định nghĩa chuẩn giao thức truyền tin chung cho toàn nhóm.<br>2. Xây dựng lõi `ChatServer` quản lý `ServerSocket` và lắng nghe kết nối.<br>3. Điều phối luồng `ClientHandler` bằng `CachedThreadPool`.<br>4. Quản lý danh sách kết nối bằng `ConcurrentHashMap` an toàn luồng.<br>5. Xây dựng cơ chế định tuyến tin nhắn: Broadcast và Unicast (1-1).<br>6. Xây dựng giao diện Server Monitor trực quan cho giáo viên quan sát. |
+| **Thành viên 2** | **Backend & Security (Auth, Phân quyền & DB)** | `common/User.java`<br>`common/MessagePacket.java`<br>`server/db/DatabaseConnection.java`<br>`server/db/UserDAO.java`<br>`server/db/GroupDAO.java`<br>`server/db/MessageDAO.java` | 1. Thiết kế lược đồ CSDL SQLite (`users`, `groups`, `group_members`, `messages`), cấu hình WAL.<br>2. Viết các lớp DAO kết nối JDBC thực hiện truy vấn CRUD.<br>3. Xây dựng chức năng Đăng ký, Đăng nhập, mã hóa SHA-256 có Salt.<br>4. Ngăn chặn đăng nhập trùng lặp (1 tài khoản đăng nhập ở 2 nơi).<br>5. Hiện thực hóa các tính năng kiểm duyệt: Kick, Mute có thời hạn, Khóa tài khoản (Ban).<br>6. Lưu trữ và nạp lại lịch sử trò chuyện khi người dùng đăng nhập. |
+| **Thành viên 3** | **Client Core (Mạng Client & Luồng dữ liệu)** | `client/network/ChatEventListener.java`<br>`client/network/SocketClient.java`<br>`client/network/ServerListener.java` | 1. Xây dựng `SocketClient` kết nối TCP Socket tới Server qua IP và Port.<br>2. Tạo luồng `ServerListener` độc lập lắng nghe dữ liệu ngầm không làm treo UI.<br>3. Hiện thực cơ chế đóng gói (Serialize) và giải mã (Deserialize) bản tin.<br>4. Thiết kế mô hình callback `ChatEventListener` chuyển dữ liệu về giao diện.<br>5. Xử lý đóng kết nối an toàn, chống deadlock khi tắt socket. |
+| **Thành viên 4** | **Frontend & GUI (Giao diện người dùng)** | `client/ui/LoginFrame.java`<br>`client/ui/ChatRoomFrame.java`<br>`client/ui/MessageBubblePanel.java`<br>`client/ui/CreateGroupDialog.java`<br>`client/ui/JoinGroupDialog.java`<br>`client/ClientMain.java` | 1. Thiết kế giao diện Đăng nhập / Đăng ký Neumorphism hiện đại.<br>2. Thiết kế màn hình Chat Messenger 3 cột: Groups, Chat Stream, Members & Leader Controls.<br>3. Khung chat bong bóng hiển thị Reply Quote, Emoji và Sticker Pusheen động.<br>4. Thanh công cụ và menu chuột phải Quản trị Admin & Trưởng nhóm.<br>5. Hỗ trợ phím Enter gửi tin, Popup thông báo khi bị Mute/Kick. |
+
+---
+
+# PHẦN 6: BỘ CÂU HỎI VẤN ĐÁP & HƯỚNG DẪN TRẢ LỜI ĐẠT ĐIỂM TỐI ĐA
+
+### ❓ Câu 1 (Dành cho TV1): Tại sao lại chọn giao thức TCP thay vì UDP cho hệ thống Chat?
+> **Trả lời:** Ứng dụng chat yêu cầu tính toàn vẹn và độ tin cậy tuyệt đối: tin nhắn không được phép bị mất gói, không được trùng lặp và bắt buộc phải đúng thứ tự hiển thị. Giao thức TCP cung cấp cơ chế bắt tay 3 bước (3-way handshake), kiểm soát luồng (flow control) và truyền lại gói tin lỗi (ACK/retransmission), trong khi UDP không đảm bảo thứ tự và có thể làm rơi tin nhắn khi mạng chập chờn.
+
+### ❓ Câu 2 (Dành cho TV1): Tại sao dùng `Executors.newCachedThreadPool()` thay vì tạo `new Thread()` thủ công?
+> **Trả lời:** Việc tạo luồng thủ công (`new Thread()`) tiêu tốn đáng kể bộ nhớ hệ thống (stack memory) và chi phí chuyển đổi ngữ cảnh (context-switch) của CPU. Khi có nhiều client kết nối và ngắt liên tục, hệ thống dễ cạn kiệt tài nguyên (`OutOfMemoryError`). `CachedThreadPool` giúp tái sử dụng các luồng đã có sẵn trong hồ bơi và tự động giải phóng các luồng nhàn rỗi sau 60 giây, giúp tối ưu hiệu năng và khả năng mở rộng của Server.
+
+### ❓ Câu 3 (Dành cho TV2): Vì sao lại chọn SQLite và bật chế độ WAL cho đồ án mạng?
+> **Trả lời:** SQLite là CSDL nhúng lưu trữ toàn bộ dữ liệu thành 1 file duy nhất (`chat.db`), không cần cài đặt dịch vụ database riêng biệt, rất tiện lợi khi nộp bài và chạy thử nghiệm. Tuy nhiên, mặc định SQLite sẽ khóa toàn bộ file khi có ghi dữ liệu. Bằng cách kích hoạt `PRAGMA journal_mode=WAL;` (Write-Ahead Logging), các luồng Đọc và Ghi có thể chạy song song độc lập, giải quyết triệt để tình trạng nghẽn kết nối khi nhiều người chat cùng lúc.
+
+### ❓ Câu 4 (Dành cho TV2): Tại sao phải băm mật khẩu bằng SHA-256 kèm Salt thay vì lưu mật khẩu trực tiếp?
+> **Trả lời:** Lưu mật khẩu dạng thô (plain-text) sẽ gây rò rỉ thông tin nghiêm trọng nếu file CSDL bị đánh cắp. Việc băm bằng thuật toán SHA-256 biến mật khẩu thành chuỗi 1 chiều không thể dịch ngược. Thêm chuỗi "Salt" bí mật giúp vô hiệu hóa các bảng băm sẵn (Rainbow Tables), chống lại việc dò quét mật khẩu phổ biến của kẻ tấn công.
+
+### ❓ Câu 5 (Dành cho TV3): Làm thế nào để luồng đọc dữ liệu từ Server không làm treo giao diện người dùng (UI Freeze)?
+> **Trả lời:** Phía Client phân tách thành 2 luồng riêng biệt: Luồng giao diện Swing (Event Dispatch Thread - EDT) chỉ lo việc hiển thị và tương tác chuột/phím. Một luồng nền độc lập (`ServerListener Thread`) được tạo ra chuyên đảm nhiệm việc đọc socket (`in.readLine()`). Khi có dữ liệu trả về, luồng nền sẽ chuyển giao dữ liệu sang EDT bằng hàm `SwingUtilities.invokeLater(...)` để đảm bảo tuân thủ nguyên tắc đơn luồng an toàn của Swing.
+
+### ❓ Câu 6 (Dành cho TV3): Khi tắt ứng dụng Client, làm sao để tránh tình trạng treo Socket hoặc rò rỉ tài nguyên (Resource Leak)?
+> **Trả lời:** Lớp `SocketClient` có phương thức `disconnect()` thực hiện đóng socket trước (`socket.close()`). Việc đóng socket sẽ giải phóng ngay lập tức lệnh `readLine()` đang bị chặn (blocking) ở luồng đọc ngầm, từ đó cho phép các luồng đóng an toàn theo thứ tự và đóng các stream `in`, `out` mà không gây ra hiện tượng deadlock giữa các luồng.
+
+### ❓ Câu 7 (Dành cho TV4): Làm thế nào để phân biệt tin nhắn của chính mình, của người khác và tin nhắn mật trên giao diện?
+> **Trả lời:** Lớp `MessageBubblePanel` kết hợp với `ChatRoomFrame` kiểm tra gói tin:
+> - Nếu `sender` trùng với `currentUsername`: render bong bóng màu xanh bên phải (`isMine = true`).
+> - Nếu là tin phòng/nhóm từ người khác: render bong bóng bên trái kèm avatar và vai trò 👑 Admin / 👤 User.
+> - Nếu là tin nhắn riêng 1-1: hiển thị tiêu đề tím bảo mật `🔒 [TIN NHẬN MẬT]`.
+> - Nếu là Sticker hoạt họa: tự động nạp ảnh GIF động qua `ImageIcon` không có viền hộp vuông thô cứng.
+
+### ❓ Câu 8 (Dành cho TV4): Cơ chế kiểm soát quyền hạn (RBAC) trên giao diện được hiện thực ra sao?
+> **Trả lời:** Khi đăng nhập thành công, Server gửi về vai trò (`ROLE_ADMIN` hoặc `ROLE_USER`). Client lưu lại vai trò này trong biến `currentRole`:
+> - Nếu là `USER`: Ẩn thanh công cụ Quản trị, các menu chuột phải chỉ có chức năng "Nhắn tin riêng" hoặc quyền Trưởng nhóm nếu chính user đó tạo nhóm.
+> - Nếu là `ADMIN`: Hiển thị thanh công cụ màu vàng có nút "Thông báo toàn phòng", "Xóa lịch sử"; menu chuột phải bổ sung thêm các tùy chọn Kick, Mute có thời hạn, Mở cấm chat và Khóa tài khoản vĩnh viễn (Ban).
+
+---
+*(Báo cáo hoàn chỉnh – Sẵn sàng in ấn, nộp đồ án và bảo vệ đạt điểm tối đa!)*
