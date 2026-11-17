@@ -83,7 +83,8 @@ public class MessageBubblePanel extends JPanel {
             stickerLabel = parts.length > 1 ? parts[1] : "Sticker";
         }
 
-        final String plainSnippet = stickerLabel != null ? "[Sticker] " + stickerLabel : mainContent;
+        final boolean isPhoto = mainContent.startsWith(common.ImageMessage.PREFIX);
+        final String plainSnippet = isPhoto ? "[Ảnh]" : stickerLabel != null ? "[Sticker] " + stickerLabel : mainContent;
 
         JPanel row = new JPanel(new BorderLayout(10, 0));
         row.setOpaque(false);
@@ -146,7 +147,23 @@ public class MessageBubblePanel extends JPanel {
         JPanel bubbleRow = new JPanel(new FlowLayout(isMine ? FlowLayout.RIGHT : FlowLayout.LEFT, 0, 0));
         bubbleRow.setOpaque(false);
 
-        if (stickerIcon != null) {
+        if (isPhoto) {
+            JPanel photo = new JPanel(new BorderLayout(0, 4));
+            photo.setOpaque(false);
+            if (replySender != null) photo.add(createQuoteBox(replySender, replySnippet), BorderLayout.NORTH);
+            try {
+                java.awt.image.BufferedImage image = common.ImageMessage.decode(mainContent);
+                double scale = Math.min(1.0, Math.min(280.0 / image.getWidth(), 220.0 / image.getHeight()));
+                Image thumbnail = image.getScaledInstance(Math.max(1, (int) (image.getWidth() * scale)),
+                        Math.max(1, (int) (image.getHeight() * scale)), Image.SCALE_SMOOTH);
+                JLabel preview = new JLabel(new ImageIcon(thumbnail));
+                preview.setToolTipText("Ảnh được gửi từ thiết bị");
+                photo.add(preview, BorderLayout.CENTER);
+            } catch (Exception e) {
+                photo.add(new JLabel("[Không thể hiển thị ảnh]"), BorderLayout.CENTER);
+            }
+            bubbleRow.add(photo);
+        } else if (stickerIcon != null) {
             bubbleRow.add(new StickerBox(stickerIcon, stickerLabel, replySender, replySnippet));
         } else {
             bubbleRow.add(new BubbleBox(mainContent, replySender, replySnippet, isMine, isPrivate));

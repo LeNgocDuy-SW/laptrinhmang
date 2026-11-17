@@ -2,6 +2,20 @@
 
 Hệ thống phòng chat trực tuyến đa người dùng thời gian thực (Real-time Multi-client Chat Room) được xây dựng theo mô hình kiến trúc **Client - Server** bằng ngôn ngữ **Java**, hỗ trợ đồng thời **App Desktop Java Swing (Socket TCP Đa luồng)** và **Giao diện Web / Điện thoại (HTTP + Server-Sent Events)** đồng bộ 100% với nhau qua cơ sở dữ liệu **SQLite**.
 
+## Gửi ảnh từ thiết bị
+
+Trong phòng chat trên desktop hoặc web, bấm **📷**, chọn ảnh rồi bấm **Open/Mở** để gửi. Ảnh hiển thị trực tiếp trong cuộc trò chuyện và được lưu cùng lịch sử. Hỗ trợ JPG/JPEG, PNG, GIF; tối đa **2 MB**, **4096 px mỗi chiều** và **12 triệu điểm ảnh**. Desktop hiển thị khung hình đầu của GIF. Người bị chặn gửi tin trong nhóm cũng không thể gửi ảnh.
+
+Sau khi cập nhật mã, chạy `compile.bat`, khởi động lại server và client; với web, tải lại trang bằng Ctrl+F5. Nếu chạy bằng JAR, chạy lại `build_jar.bat`.
+
+Kiểm thử chức năng ảnh (sau khi biên dịch):
+
+```powershell
+java -cp ".;lib/*" test.ImageMessageIntegrationTest
+node test/web_image_test.js
+```
+
+
 ---
 
 ## ✨ Các Tính Năng Chính Hiện Có

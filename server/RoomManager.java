@@ -16,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class RoomManager {
     private final ConcurrentHashMap<String, ClientHandler> onlineClients = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, User> webClients = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> webLastSeen = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> mutedUsers = new ConcurrentHashMap<>();
     private final GroupDAO groupDAO = new GroupDAO();
 
@@ -87,6 +88,8 @@ public class RoomManager {
     }
 
     public synchronized boolean addWebClient(String username, String role) {
+        // HTTP activity keeps presence alive even if a proxy drops the SSE stream.
+        if (!onlineClients.containsKey(username)) webLastSeen.put(username, System.currentTimeMillis());
         if (onlineClients.containsKey(username) || webClients.containsKey(username)) {
             return false;
         }
@@ -104,6 +107,7 @@ public class RoomManager {
     }
 
     public synchronized void removeWebClient(String username) {
+        webLastSeen.remove(username);
         User u = webClients.remove(username);
         if (u != null) {
             log("[NGẮT KẾT NỐI WEB] " + username + " đã đóng trình duyệt.");
@@ -112,6 +116,13 @@ public class RoomManager {
                 listener.onOnlineListUpdated(getOnlineUsersList());
             }
             broadcastUserList();
+        }
+    }
+
+    public synchronized void expireInactiveWebClients(long timeoutMillis) {
+        long cutoff = System.currentTimeMillis() - timeoutMillis;
+        for (Map.Entry<String, Long> entry : webLastSeen.entrySet()) {
+            if (entry.getValue() <= cutoff) removeWebClient(entry.getKey());
         }
     }
 
@@ -353,6 +364,7 @@ public class RoomManager {
         }
         onlineClients.clear();
         webClients.clear();
+        webLastSeen.clear();
         mutedUsers.clear();
     }
 }

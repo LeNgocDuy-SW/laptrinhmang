@@ -72,6 +72,10 @@ async function restoreSessionOnLoad() {
 }
 
 window.addEventListener("DOMContentLoaded", restoreSessionOnLoad);
+window.addEventListener("focus", () => loadGroupMembers(state.activeRoom));
+window.addEventListener("visibilitychange", () => {
+    if (!document.hidden) loadGroupMembers(state.activeRoom);
+});
 
 // ==========================================================================
 // 1. XỬ LÝ ĐĂNG NHẬP & ĐĂNG KÝ (NEUMORPHIC AUTH SCREEN)
@@ -199,6 +203,7 @@ async function enterChatScreen() {
         if (state.currentUser && state.activeRoom) {
             syncLatestMessages(state.activeRoom);
             loadGroups();
+            loadGroupMembers(state.activeRoom);
         }
     }, 3000);
 }
@@ -223,6 +228,7 @@ function initEventSource() {
         }
     };
 
+    state.eventSource.onopen = () => loadGroupMembers(state.activeRoom);
     state.eventSource.onerror = (err) => {
         // SSE tự động kết nối lại khi có lỗi
     };
@@ -575,39 +581,79 @@ async function syncLatestMessages(groupName) {
     } catch (ignored) {}
 }
 
-async function sendPayloadContent(rawContent) {
-    if (!rawContent || !rawContent.trim()) return;
+function captureSendContext() {
+    return { user: state.currentUser, role: state.currentRole,
+        room: state.activeRoom, reply: state.replyTarget };
+}
 
+async function sendPayloadContent(rawContent, context = captureSendContext()) {
+    if (!rawContent || !rawContent.trim() || !context.user) return;
     let finalContent = rawContent.trim();
-    if (state.replyTarget) {
-        const safeSnip = (state.replyTarget.snippet || "").replace(/\]\]/g, ")").replace(/\|/g, "/");
-        finalContent = `[[REPLY|${state.replyTarget.sender}|${safeSnip}]]${finalContent}`;
-        cancelReply();
+    if (context.reply) {
+        const safeSnip = (context.reply.snippet || "").replace(/\]\]/g, ")").replace(/\|/g, "/");
+        finalContent = `[[REPLY|${context.reply.sender}|${safeSnip}]]${finalContent}`;
     }
-
     try {
         const res = await fetch("/api/send", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                sender: state.currentUser,
-                role: state.currentRole,
-                groupName: state.activeRoom,
-                content: finalContent,
-                isPrivate: "false"
+                sender: context.user, role: context.role, groupName: context.room,
+                content: finalContent, isPrivate: "false"
             })
         });
         const data = await res.json();
         if (data.success) {
+            if (state.replyTarget === context.reply) cancelReply();
             const timeStr = data.time || (new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            const sig = `${state.currentUser}|${finalContent}|${timeStr}`;
-            state.renderedMessages.add(sig);
-            appendMessageBubble(state.currentUser, state.currentRole, timeStr, finalContent, true);
+            const sig = `${context.user}|${finalContent}|${timeStr}`;
+            if (state.currentUser === context.user && state.activeRoom === context.room && !state.renderedMessages.has(sig)) {
+                state.renderedMessages.add(sig);
+                appendMessageBubble(context.user, context.role, timeStr, finalContent, true);
+            }
         } else {
             alert(data.message || "Không thể gửi tin nhắn.");
         }
     } catch (e) {
         alert("Lỗi kết nối khi gửi tin nhắn.");
+    }
+}
+
+async function sendSelectedImage(event) {
+    const input = event.target;
+    const file = input.files && input.files[0];
+    input.value = "";
+    if (!file) return;
+    if (!/^image\/(jpeg|png|gif)$/.test(file.type)) {
+        alert("Chỉ hỗ trợ ảnh JPG, PNG và GIF.");
+        return;
+    }
+    if (file.size < 1 || file.size > 2 * 1024 * 1024) {
+        alert("Ảnh phải có dung lượng từ 1 byte đến 2 MB.");
+        return;
+    }
+    const context = captureSendContext();
+    const button = document.getElementById("btnSendImage");
+    button.disabled = true;
+    button.textContent = "…";
+    button.setAttribute("aria-busy", "true");
+    try {
+        const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result));
+            reader.onerror = () => reject(new Error("Không thể đọc tệp ảnh."));
+            reader.onabort = () => reject(new Error("Đã hủy đọc tệp ảnh."));
+            reader.readAsDataURL(file);
+        });
+        if (state.currentUser !== context.user) return;
+        const encoded = dataUrl.substring(dataUrl.indexOf(",") + 1);
+        await sendPayloadContent(`[[IMAGE|${file.type}|${encoded}]]`, context);
+    } catch (e) {
+        alert(e.message || "Không thể đọc tệp ảnh.");
+    } finally {
+        button.disabled = false;
+        button.textContent = "📷";
+        button.removeAttribute("aria-busy");
     }
 }
 
@@ -671,7 +717,7 @@ function appendMessageBubble(sender, role, time, content, isMine) {
         stickerLabel = sep >= 0 ? meta.substring(sep + 1) : "Sticker";
     }
 
-    const plainSnippet = stickerLabel ? `[Sticker] ${stickerLabel}` : mainContent;
+    const plainSnippet = mainContent.startsWith("[[IMAGE|") ? "[Ảnh]" : stickerLabel ? `[Sticker] ${stickerLabel}` : mainContent;
     const initial = sender.substring(0, 1).toUpperCase();
 
     const quoteHtml = replySender
@@ -679,7 +725,16 @@ function appendMessageBubble(sender, role, time, content, isMine) {
         : "";
 
     let bodyHtml = `<div class="msg-bubble">${quoteHtml}${escapeHtml(mainContent)}</div>`;
-    if (stickerIcon) {
+    if (mainContent.startsWith("[[IMAGE|") && mainContent.endsWith("]]")) {
+        const sep = mainContent.indexOf("|", 8);
+        const mime = sep >= 0 ? mainContent.substring(8, sep) : "";
+        const encoded = sep >= 0 ? mainContent.substring(sep + 1, mainContent.length - 2) : "";
+        bodyHtml = `${quoteHtml}<div class="msg-bubble">[Không thể hiển thị ảnh]</div>`;
+        if (/^image\/(jpeg|png|gif)$/.test(mime) && encoded.length > 0 && encoded.length <= 2796204
+                && /^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) {
+            bodyHtml = `${quoteHtml}<img class="msg-photo-img" src="data:${mime};base64,${encoded}" alt="Ảnh được gửi trong phòng chat" loading="lazy">`;
+        }
+    } else if (stickerIcon) {
         const isImage = stickerIcon.endsWith(".gif") || stickerIcon.endsWith(".png") || stickerIcon.endsWith(".webp") || stickerIcon.includes("stickers/") || stickerIcon.startsWith("http");
         if (isImage) {
             let src = stickerIcon;
@@ -705,6 +760,12 @@ function appendMessageBubble(sender, role, time, content, isMine) {
     `;
 
     row.querySelector(".reply-btn-inline").onclick = () => setReplyTarget(sender, plainSnippet);
+    const photo = row.querySelector(".msg-photo-img");
+    if (photo) {
+        const followBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+        photo.onload = () => { if (followBottom) container.scrollTop = container.scrollHeight; };
+        photo.onerror = () => { photo.alt = "Không thể hiển thị ảnh"; };
+    }
     container.appendChild(row);
     container.scrollTop = container.scrollHeight;
 }
@@ -725,12 +786,17 @@ function appendSystemNotice(text) {
 // 5. THÀNH VIÊN NHÓM & ĐẶC QUYỀN TRƯỞNG NHÓM
 // ==========================================================================
 
+let memberRefreshSequence = 0;
+
 async function loadGroupMembers(groupName) {
     if (!state.currentUser || !groupName) return;
+    const user = state.currentUser;
+    const requestId = ++memberRefreshSequence;
     try {
-        const res = await fetch(`/api/group_members?group=${encodeURIComponent(groupName)}&user=${encodeURIComponent(state.currentUser)}`);
+        const res = await fetch(`/api/group_members?group=${encodeURIComponent(groupName)}&user=${encodeURIComponent(user)}`, { cache: "no-store" });
         const data = await res.json();
-        if (data.success && data.groupName === state.activeRoom) {
+        if (requestId === memberRefreshSequence && user === state.currentUser
+                && data.success && data.groupName === state.activeRoom) {
             state.activeGroupInfo = data;
             renderGroupMembers(data);
         }
@@ -752,11 +818,11 @@ function renderGroupMembers(info) {
     const onlineCount = members.filter(m => m.online).length;
 
     label.innerText = `Thành viên nhóm (${members.length})`;
-    subtitle.innerText = `👥 ${members.length} Thành viên • 🟢 ${Math.max(1, onlineCount)} Online`;
+    subtitle.innerText = `👥 ${members.length} Thành viên • 🟢 ${onlineCount} Online`;
     rightLeader.innerText = `👑 Trưởng nhóm: ${info.creator || "admin"}`;
     rightCount.innerText = `👥 Thành viên: ${members.length}`;
     if (info.groupName === "Friends & Family") {
-        favTag.innerText = `🟢 ${Math.max(1, onlineCount)} Online`;
+        favTag.innerText = `🟢 ${onlineCount} Online`;
     }
 
     leaderBox.style.display = info.isLeader ? "block" : "none";
@@ -784,9 +850,11 @@ function renderGroupMembers(info) {
 
         item.innerHTML = `
             <div class="member-avatar">${initial}</div>
-            <div class="member-name">${escapeHtml(m.username)} ${tags.join(" ")}</div>
+            <div class="member-name">${escapeHtml(m.username)} ${tags.join(" ")}
+                <span class="member-presence ${m.online ? 'online' : 'offline'}">${m.online ? 'Đang online' : 'Offline'}</span>
+            </div>
             ${actionsHtml}
-            <div class="status-dot ${m.online ? 'online' : 'offline'}"></div>
+            <div class="status-dot ${m.online ? 'online' : 'offline'}" title="${m.online ? 'Đang online' : 'Offline'}"></div>
         `;
         container.appendChild(item);
     });

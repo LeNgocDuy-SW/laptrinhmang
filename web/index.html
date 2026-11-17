@@ -224,6 +224,8 @@
                 </div>
 
                 <div class="pill-chat-input-box">
+                    <input type="file" id="chatImageInput" accept="image/jpeg,image/png,image/gif" hidden onchange="sendSelectedImage(event)">
+                    <button type="button" id="btnSendImage" class="action-btn" onclick="document.getElementById('chatImageInput').click()" title="Gửi ảnh JPG, PNG, GIF (tối đa 2 MB)">📷</button>
                     <button type="button" class="action-btn" onclick="toggleEmojiPicker()" title="Chọn Icon & Sticker">😊</button>
                     <input type="text" id="txtChatMessage" placeholder="Type a message..." autocomplete="off" onkeydown="handleInputKeyDown(event)">
                     <button type="button" class="btn-send-pill" onclick="sendActiveMessage()">Send</button>

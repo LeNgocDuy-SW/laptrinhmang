@@ -41,6 +41,8 @@ public class WebChatServer implements RoomManager.WebEventListener {
 
     private HttpServer server;
     private ExecutorService sseExecutor;
+    private java.util.concurrent.ScheduledExecutorService presenceExecutor;
+    private static final long WEB_PRESENCE_TIMEOUT_MS = 45000;
     private volatile boolean running = false;
 
     // Quản lý các luồng SSE đang kết nối theo từng username
@@ -85,6 +87,14 @@ public class WebChatServer implements RoomManager.WebEventListener {
 
             server.start();
             running = true;
+            presenceExecutor = Executors.newSingleThreadScheduledExecutor();
+            presenceExecutor.scheduleAtFixedRate(() -> {
+                try {
+                    roomManager.expireInactiveWebClients(WEB_PRESENCE_TIMEOUT_MS);
+                } catch (Exception e) {
+                    roomManager.log("[PRESENCE] " + e.getMessage());
+                }
+            }, 5, 5, java.util.concurrent.TimeUnit.SECONDS);
             roomManager.log("[WEB SERVER] Cổng giao diện Web đang hoạt động tại http://localhost:" + webPort + " (hoặc IP mạng LAN)");
             return true;
         } catch (IOException e) {
@@ -97,6 +107,7 @@ public class WebChatServer implements RoomManager.WebEventListener {
     public synchronized void stop() {
         if (!running) return;
         running = false;
+        if (presenceExecutor != null) presenceExecutor.shutdownNow();
 
         // Đóng tất cả các luồng SSE
         for (CopyOnWriteArrayList<OutputStream> list : sseStreams.values()) {
@@ -129,6 +140,7 @@ public class WebChatServer implements RoomManager.WebEventListener {
         String header = parts[0];
 
         if (Protocol.RES_NEW_MSG.equals(header)) {
+            parts = packet.split(Protocol.DELIMITER_REGEX, 6);
             // NEW_MSG|groupName|sender|role|timestamp|content
             if (parts.length >= 6) {
                 String g = parts[1];
@@ -171,7 +183,7 @@ public class WebChatServer implements RoomManager.WebEventListener {
 
     @Override
     public boolean onWebPrivate(String sender, String receiver, String packet, String echoPacket) {
-        String[] parts = packet.split(Protocol.DELIMITER_REGEX);
+        String[] parts = packet.split(Protocol.DELIMITER_REGEX, 5);
         if (parts.length >= 5) {
             String s = parts[1];
             String target = parts[2];
@@ -324,14 +336,12 @@ public class WebChatServer implements RoomManager.WebEventListener {
             } catch (Exception ignored) {
                 // Client ngắt kết nối (tắt tab hoặc mất mạng)
             } finally {
-                CopyOnWriteArrayList<OutputStream> list = sseStreams.get(user);
-                if (list != null) {
-                    list.remove(os);
-                    if (list.isEmpty()) {
-                        sseStreams.remove(user);
-                        roomManager.removeWebClient(user);
-                    }
-                }
+                // A disconnected event stream does not mean the browser is offline.
+                // HTTP heartbeats and the presence timeout determine that separately.
+                sseStreams.computeIfPresent(user, (key, streams) -> {
+                    streams.remove(os);
+                    return streams.isEmpty() ? null : streams;
+                });
                 try { os.close(); } catch (Exception ignored) {}
                 try { exchange.close(); } catch (Exception ignored) {}
             }
@@ -553,6 +563,7 @@ public class WebChatServer implements RoomManager.WebEventListener {
             Map<String, String> query = parseQuery(exchange.getRequestURI().getQuery());
             String groupName = query.getOrDefault("group", Protocol.DEFAULT_GROUP).trim();
             String currentUser = query.getOrDefault("user", "").trim();
+            recordWebActivity(currentUser);
 
             String creator = groupDAO.getGroupCreator(groupName);
             boolean isGlobalAdmin = false;
@@ -694,7 +705,15 @@ public class WebChatServer implements RoomManager.WebEventListener {
                 return;
             }
 
-            Map<String, String> body = parseJsonOrForm(readBody(exchange));
+            byte[] requestBytes;
+            try (InputStream input = exchange.getRequestBody()) {
+                requestBytes = input.readNBytes(common.ImageMessage.MAX_BASE64 + 16385);
+            }
+            if (requestBytes.length > common.ImageMessage.MAX_BASE64 + 16384) {
+                sendJsonResponse(exchange, 413, "{\"success\":false,\"message\":\"Ảnh quá lớn (tối đa 2 MB).\"}");
+                return;
+            }
+            Map<String, String> body = parseJsonOrForm(new String(requestBytes, StandardCharsets.UTF_8));
             String sender = body.getOrDefault("sender", "").trim();
             String role = body.getOrDefault("role", "USER").trim();
             String groupName = body.getOrDefault("groupName", "Friends & Family").trim();
@@ -707,6 +726,7 @@ public class WebChatServer implements RoomManager.WebEventListener {
                 return;
             }
 
+            recordWebActivity(sender);
             if (roomManager.isUserMuted(sender)) {
                 sendJsonResponse(exchange, 403, "{\"success\":false,\"message\":\"Bạn đang bị cấm chat!\"}");
                 return;
@@ -726,6 +746,12 @@ public class WebChatServer implements RoomManager.WebEventListener {
                 }
             }
 
+            try {
+                common.ImageMessage.validateContent(content);
+            } catch (IOException e) {
+                sendJsonResponse(exchange, 400, "{\"success\":false,\"message\":\"" + escapeJson(e.getMessage()) + "\"}");
+                return;
+            }
             String time = LocalDateTime.now().format(TIME_FMT);
 
             if (isPrivate) {
@@ -850,6 +876,14 @@ public class WebChatServer implements RoomManager.WebEventListener {
     // UTILITY METHODS
     // =========================================================================
 
+    private void recordWebActivity(String username) {
+        if (username == null || username.isEmpty()) return;
+        User user = userDAO.findByUsername(username);
+        if (user != null && !user.isBanned()) {
+            roomManager.addWebClient(user.getUsername(), user.getRole());
+        }
+    }
+
     private static void setCors(HttpExchange exchange) {
         exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
         exchange.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -860,6 +894,7 @@ public class WebChatServer implements RoomManager.WebEventListener {
         setCors(exchange);
         byte[] b = json.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+        exchange.getResponseHeaders().set("Cache-Control", "no-store");
         exchange.sendResponseHeaders(status, b.length);
         OutputStream os = exchange.getResponseBody();
         os.write(b);

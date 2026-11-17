@@ -290,6 +290,7 @@ public class ClientHandler implements Runnable {
             return;
         }
 
+        if (!validateImageContent(content)) return;
         String time = LocalDateTime.now().format(TIME_FMT);
 
         MessagePacket msg = new MessagePacket(MessagePacket.TYPE_PUBLIC, this.username, this.role, "ALL", groupName, content);
@@ -305,6 +306,16 @@ public class ClientHandler implements Runnable {
                 + content;
 
         roomManager.broadcastToGroup(groupName, broadcastPacket);
+    }
+
+    private boolean validateImageContent(String content) {
+        try {
+            common.ImageMessage.validateContent(content);
+            return true;
+        } catch (IOException e) {
+            sendPacket(Protocol.RES_SYSTEM_MSG + Protocol.DELIMITER + e.getMessage());
+            return false;
+        }
     }
 
     private void handlePublicMessage(String content) {
@@ -329,6 +340,7 @@ public class ClientHandler implements Runnable {
             return;
         }
 
+        if (!validateImageContent(content)) return;
         String time = LocalDateTime.now().format(TIME_FMT);
         MessagePacket msg = new MessagePacket(MessagePacket.TYPE_PRIVATE, this.username, this.role, target, content);
         msg.setTimestamp(time);

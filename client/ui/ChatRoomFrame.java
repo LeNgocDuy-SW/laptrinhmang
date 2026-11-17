@@ -66,6 +66,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
     private JScrollPane scrollMessages;
     private JTextField txtChatInput;
     private PillButton btnSend;
+    private JButton btnAttach;
 
     // UI Cột phải
     private JLabel lblRightGroupTitle;
@@ -319,12 +320,12 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         pillInputBox.setPreferredSize(new Dimension(0, 48));
         pillInputBox.setBorder(new EmptyBorder(4, 14, 4, 6));
 
-        JButton btnAttach = new JButton("📎");
+        btnAttach = new JButton("📷");
         btnAttach.setFont(new Font("Segoe UI Emoji", Font.PLAIN, 15));
         btnAttach.setBorder(null);
         btnAttach.setContentAreaFilled(false);
         btnAttach.setCursor(new Cursor(Cursor.HAND_CURSOR));
-        btnAttach.setToolTipText("Gửi file đính kèm");
+        btnAttach.setToolTipText("Gửi ảnh JPG, PNG, GIF (tối đa 2 MB)");
         btnAttach.addActionListener(e -> sendFileAttachment());
 
         txtChatInput = new JTextField();
@@ -930,18 +931,51 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
     }
 
     private void sendFileAttachment() {
-        JFileChooser chooser = new JFileChooser();
-        int res = chooser.showOpenDialog(this);
-        if (res == JFileChooser.APPROVE_OPTION) {
-            String fileName = chooser.getSelectedFile().getName();
-            long sizeKb = chooser.getSelectedFile().length() / 1024;
-            String msg = "📎 [Đính kèm tệp]: " + fileName + " (" + sizeKb + " KB)";
-            if (privateChatTarget != null) {
-                socketClient.sendPrivateMessage(privateChatTarget, msg);
-            } else {
-                socketClient.sendGroupMessage(activeRoom, msg);
-            }
+        if (isMuted || socketClient == null || !socketClient.isConnected()) {
+            JOptionPane.showMessageDialog(this, "Không thể gửi ảnh: bạn bị cấm chat hoặc đã mất kết nối.");
+            return;
         }
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Chọn ảnh để gửi (tối đa 2 MB)");
+        chooser.setAcceptAllFileFilterUsed(false);
+        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Ảnh JPG, PNG, GIF", "jpg", "jpeg", "png", "gif"));
+        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        File file = chooser.getSelectedFile();
+        final String room = activeRoom;
+        final String target = privateChatTarget;
+        final String replySender = replyTargetSender;
+        final String replySnippet = replyTargetSnippet;
+        btnAttach.setEnabled(false);
+        new SwingWorker<Void, Void>() {
+            @Override protected Void doInBackground() throws Exception {
+                if (!file.isFile() || file.length() == 0 || file.length() > common.ImageMessage.MAX_BYTES)
+                    throw new java.io.IOException("Vui lòng chọn ảnh có dung lượng từ 1 byte đến 2 MB.");
+                byte[] bytes;
+                try (java.io.InputStream in = java.nio.file.Files.newInputStream(file.toPath())) {
+                    bytes = in.readNBytes(common.ImageMessage.MAX_BYTES + 1);
+                }
+                String payload = common.ImageMessage.encode(bytes);
+                if (replySender != null) {
+                    payload = "[[REPLY|" + replySender + "|" +
+                            (replySnippet == null ? "" : replySnippet.replace("]]", ")")) + "]]" + payload;
+                }
+                if (!socketClient.isConnected()) throw new java.io.IOException("Đã mất kết nối với máy chủ.");
+                if (target != null) socketClient.sendPrivateMessage(target, payload);
+                else socketClient.sendGroupMessage(room, payload);
+                return null;
+            }
+            @Override protected void done() {
+                btnAttach.setEnabled(true);
+                try {
+                    get();
+                    if (java.util.Objects.equals(replySender, replyTargetSender)
+                            && java.util.Objects.equals(replySnippet, replyTargetSnippet)) clearReplyState();
+                } catch (Exception e) {
+                    Throwable cause = e.getCause() != null ? e.getCause() : e;
+                    JOptionPane.showMessageDialog(ChatRoomFrame.this, cause.getMessage(), "Không gửi được ảnh", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
     }
 
     private void doLogout() {
