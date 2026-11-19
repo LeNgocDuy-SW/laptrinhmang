@@ -117,7 +117,7 @@ tạo/tham gia nhóm, quản trị người dùng và nhóm, lưu/tải lịch s
 
 7. LỆNH CHẠY CƠ BẢN
 -------------------
-Biên dịch:       .\compile.bat
+Biên dịch:       .\compile.bat (Chạy 1 lần duy nhất, các lần sau không cần chạy)
 Chạy server:     .\run_server.bat
 Chạy Swing:      .\run_client.bat (Mở 1 terminal khác chạy song song với terminal chạy server)
 Chạy kiểm thử:   .\run_tests.bat
