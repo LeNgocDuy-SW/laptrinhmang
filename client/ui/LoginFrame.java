@@ -12,6 +12,7 @@ import java.awt.*;
 import java.awt.event.*;
 import java.awt.geom.*;
 import java.net.InetAddress;
+import java.net.URI;
 import java.util.List;
 
 /**
@@ -48,59 +49,36 @@ public class LoginFrame extends JFrame implements ChatEventListener {
     private final SocketClient socketClient;
 
     public LoginFrame() {
-        super("Multi-Client Chat - Welcome Back");
+        super("Chat Room - Đăng nhập");
         this.socketClient = new SocketClient();
         initComponents();
     }
 
     private void initComponents() {
-        setSize(440, 680);
+        setSize(460, 700);
+        setMinimumSize(new Dimension(420, 640));
         setResizable(false);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
-        // Khung nền chính với màu Neumorphic và các khối cầu ánh sáng mờ ảo
-        JPanel backgroundPanel = new JPanel(new GridBagLayout()) {
+        JPanel backgroundPanel = new JPanel(new GridBagLayout());
+        backgroundPanel.setBackground(UIUtils.BG_MAIN);
+
+        // Thẻ trung tâm Neumorphic Card
+        JPanel cardPanel = new JPanel() {
             @Override
             protected void paintComponent(Graphics g) {
-                super.paintComponent(g);
                 Graphics2D g2 = (Graphics2D) g.create();
                 UIUtils.enableAntialiasing(g2);
-
-                int w = getWidth();
-                int h = getHeight();
-
-                // Nền Gradient chuyển từ trắng xám ánh xanh nhẹ
-                GradientPaint bgPaint = new GradientPaint(0, 0, new Color(243, 246, 252), w, h, new Color(233, 240, 250));
-                g2.setPaint(bgPaint);
-                g2.fillRect(0, 0, w, h);
-
-                // Khối cầu ánh sáng mờ góc trên trái
-                g2.setColor(new Color(205, 225, 255, 110));
-                g2.fillOval(-60, -60, 220, 220);
-                g2.setColor(new Color(255, 255, 255, 140));
-                g2.fillOval(-30, -30, 140, 140);
-
-                // Khối cầu ánh sáng góc trên phải
-                g2.setColor(new Color(210, 228, 255, 80));
-                g2.fillOval(w - 110, 40, 160, 160);
-
-                // Khối cầu ánh sáng góc dưới
-                g2.setColor(new Color(220, 235, 255, 90));
-                g2.fillOval(w - 140, h - 140, 200, 200);
-                g2.fillOval(-50, h - 120, 160, 160);
-
+                UIUtils.drawRoundedCard(g2, 0, 0, getWidth(), getHeight(), 12,
+                        Color.WHITE, UIUtils.BORDER_LIGHT);
                 g2.dispose();
             }
         };
-        backgroundPanel.setOpaque(true);
-
-        // Thẻ trung tâm Neumorphic Card
-        JPanel cardPanel = new JPanel();
         cardPanel.setOpaque(false);
-        cardPanel.setPreferredSize(new Dimension(380, 630));
+        cardPanel.setPreferredSize(new Dimension(380, 650));
         cardPanel.setLayout(new BoxLayout(cardPanel, BoxLayout.Y_AXIS));
-        cardPanel.setBorder(new EmptyBorder(10, 20, 14, 20));
+        cardPanel.setBorder(new EmptyBorder(18, 20, 14, 20));
 
         // 1. Logo 3D Wave/Flame trên thẻ Neumorphic squircle
         JPanel logoContainer = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
@@ -180,7 +158,7 @@ public class LoginFrame extends JFrame implements ChatEventListener {
         cardPanel.add(Box.createVerticalStrut(14));
 
         // 2. Tiêu đề "Welcome Back" & Phụ đề "Sign in to continue"
-        lblTitle = new JLabel("Welcome Back");
+        lblTitle = new JLabel("Chào mừng trở lại");
         lblTitle.setFont(new Font("Segoe UI", Font.BOLD, 26));
         lblTitle.setForeground(new Color(16, 24, 40));
         lblTitle.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -188,7 +166,7 @@ public class LoginFrame extends JFrame implements ChatEventListener {
 
         cardPanel.add(Box.createVerticalStrut(4));
 
-        lblSub = new JLabel("Sign in to continue");
+        lblSub = new JLabel("Đăng nhập để tiếp tục trò chuyện");
         lblSub.setFont(new Font("Segoe UI", Font.PLAIN, 13));
         lblSub.setForeground(new Color(100, 116, 139));
         lblSub.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -210,8 +188,8 @@ public class LoginFrame extends JFrame implements ChatEventListener {
         txtUser.setBorder(null);
         txtUser.setFont(new Font("Segoe UI", Font.PLAIN, 14));
         txtUser.setForeground(new Color(30, 41, 59));
-        txtUser.setCaretColor(new Color(37, 117, 252));
-        txtUser.putClientProperty("JTextField.placeholderText", "Username or Email");
+        txtUser.setCaretColor(UIUtils.PRIMARY_BLUE);
+        txtUser.putClientProperty("JTextField.placeholderText", "Tên đăng nhập");
         userFieldWrapper.add(txtUser, BorderLayout.CENTER);
         cardPanel.add(userFieldWrapper);
 
@@ -231,7 +209,7 @@ public class LoginFrame extends JFrame implements ChatEventListener {
         txtPass.setBorder(null);
         txtPass.setFont(new Font("Segoe UI", Font.PLAIN, 14));
         txtPass.setForeground(new Color(30, 41, 59));
-        txtPass.setCaretColor(new Color(37, 117, 252));
+        txtPass.setCaretColor(UIUtils.PRIMARY_BLUE);
         passFieldWrapper.add(txtPass, BorderLayout.CENTER);
 
         JButton btnToggleEye = new JButton("👁");
@@ -250,13 +228,13 @@ public class LoginFrame extends JFrame implements ChatEventListener {
 
         cardPanel.add(Box.createVerticalStrut(12));
 
-        // 5. Hàng "Remember Me" và "Forgot Password?"
+        // 5. Tùy chọn ghi nhớ và trợ giúp tài khoản
         JPanel rememberRow = new JPanel(new BorderLayout());
         rememberRow.setOpaque(false);
         rememberRow.setMaximumSize(new Dimension(340, 24));
         rememberRow.setAlignmentX(Component.CENTER_ALIGNMENT);
 
-        JCheckBox chkRemember = new JCheckBox("Remember Me", rememberMe);
+        JCheckBox chkRemember = new JCheckBox("Ghi nhớ đăng nhập", rememberMe);
         chkRemember.setOpaque(false);
         chkRemember.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         chkRemember.setForeground(new Color(71, 85, 105));
@@ -264,7 +242,7 @@ public class LoginFrame extends JFrame implements ChatEventListener {
         chkRemember.addActionListener(e -> rememberMe = chkRemember.isSelected());
         rememberRow.add(chkRemember, BorderLayout.WEST);
 
-        JLabel lblForgot = new JLabel("Forgot Password?");
+        JLabel lblForgot = new JLabel("Quên mật khẩu?");
         lblForgot.setFont(new Font("Segoe UI", Font.BOLD, 12));
         lblForgot.setForeground(new Color(37, 117, 252));
         lblForgot.setCursor(new Cursor(Cursor.HAND_CURSOR));
@@ -279,7 +257,7 @@ public class LoginFrame extends JFrame implements ChatEventListener {
 
         cardPanel.add(Box.createVerticalStrut(16));
 
-        // 6. Nút Đăng Nhập lớn màu Xanh Gradient kèm huy hiệu mũi tên ->
+        // 6. Nút hành động chính
         btnMainAction = new JButton("Login") {
             @Override
             protected void paintComponent(Graphics g) {
@@ -289,39 +267,17 @@ public class LoginFrame extends JFrame implements ChatEventListener {
                 int h = getHeight();
                 int arc = h;
 
-                // Bóng đổ màu xanh dưới nút
-                g2.setColor(new Color(37, 117, 252, 90));
-                g2.fillRoundRect(4, 5, w - 8, h - 5, arc, arc);
-
-                // Nền Gradient xanh dương rực rỡ
-                GradientPaint btnGrad = new GradientPaint(0, 0, new Color(37, 117, 252), w, 0, new Color(16, 84, 226));
-                g2.setPaint(btnGrad);
+                g2.setColor(isEnabled() ? UIUtils.PRIMARY_BLUE : UIUtils.TEXT_MUTED);
                 g2.fillRoundRect(0, 0, w, h, arc, arc);
 
                 // Chữ ở giữa
                 g2.setColor(Color.WHITE);
-                g2.setFont(new Font("Segoe UI", Font.BOLD, 16));
+                g2.setFont(new Font("Segoe UI", Font.BOLD, 15));
                 FontMetrics fm = g2.getFontMetrics();
                 String text = getText();
-                int tx = (w - fm.stringWidth(text)) / 2 - 10;
+                int tx = (w - fm.stringWidth(text)) / 2;
                 int ty = (h - fm.getHeight()) / 2 + fm.getAscent();
                 g2.drawString(text, tx, ty);
-
-                // Huy hiệu tròn trắng mờ chứa mũi tên -> ở góc phải
-                int badgeSize = 34;
-                int bx = w - badgeSize - 10;
-                int by = (h - badgeSize) / 2;
-                g2.setColor(new Color(255, 255, 255, 60));
-                g2.fillOval(bx, by, badgeSize, badgeSize);
-
-                // Mũi tên ->
-                g2.setColor(Color.WHITE);
-                g2.setStroke(new BasicStroke(2.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                int ax = bx + 11;
-                int ay = by + badgeSize / 2;
-                g2.drawLine(ax, ay, ax + 12, ay);
-                g2.drawLine(ax + 7, ay - 5, ax + 12, ay);
-                g2.drawLine(ax + 7, ay + 5, ax + 12, ay);
 
                 g2.dispose();
             }
@@ -338,95 +294,34 @@ public class LoginFrame extends JFrame implements ChatEventListener {
 
         cardPanel.add(Box.createVerticalStrut(18));
 
-        // 7. Dòng phân cách "──  OR CONTINUE WITH  ──"
-        JPanel dividerPanel = new JPanel() {
-            @Override
-            protected void paintComponent(Graphics g) {
-                super.paintComponent(g);
-                Graphics2D g2 = (Graphics2D) g.create();
-                UIUtils.enableAntialiasing(g2);
+        cardPanel.add(Box.createVerticalStrut(20));
 
-                int w = getWidth();
-                int h = getHeight();
-                g2.setFont(new Font("Segoe UI", Font.BOLD, 10));
-                FontMetrics fm = g2.getFontMetrics();
-                String text = "OR CONTINUE WITH";
-                int textW = fm.stringWidth(text);
-                int cy = h / 2;
+        JPanel alternateActions = new JPanel(new FlowLayout(FlowLayout.CENTER, 12, 0));
+        alternateActions.setOpaque(false);
+        alternateActions.setMaximumSize(new Dimension(340, 38));
+        alternateActions.setAlignmentX(Component.CENTER_ALIGNMENT);
 
-                g2.setColor(new Color(203, 213, 225));
-                g2.setStroke(new BasicStroke(1.2f));
-                g2.drawLine(20, cy, (w - textW) / 2 - 12, cy);
-                g2.drawLine((w + textW) / 2 + 12, cy, w - 20, cy);
+        JButton btnServerConfig = new JButton("⚙  Cấu hình máy chủ");
+        btnServerConfig.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        btnServerConfig.setForeground(UIUtils.TEXT_SECONDARY);
+        btnServerConfig.setBorder(new EmptyBorder(8, 10, 8, 10));
+        btnServerConfig.setContentAreaFilled(false);
+        btnServerConfig.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        btnServerConfig.addActionListener(e -> showServerConfigDialog());
+        alternateActions.add(btnServerConfig);
 
-                g2.setColor(new Color(148, 163, 184));
-                g2.drawString(text, (w - textW) / 2, cy + fm.getAscent() / 2 - 1);
-                g2.dispose();
-            }
-        };
-        dividerPanel.setOpaque(false);
-        dividerPanel.setPreferredSize(new Dimension(340, 20));
-        dividerPanel.setMaximumSize(new Dimension(340, 20));
-        dividerPanel.setAlignmentX(Component.CENTER_ALIGNMENT);
-        cardPanel.add(dividerPanel);
-
-        cardPanel.add(Box.createVerticalStrut(14));
-
-        // 8. Hàng 4 nút Neumorphic squircle: Google, Discord, Facebook, Server Config
-        JPanel socialRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 14, 0));
-        socialRow.setOpaque(false);
-        socialRow.setMaximumSize(new Dimension(340, 56));
-        socialRow.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        // Nút 1: Google
-        socialRow.add(createNeumorphicSocialButton("Google", (g2, w, h) -> {
-            g2.setFont(new Font("Segoe UI", Font.BOLD, 18));
-            FontMetrics fm = g2.getFontMetrics();
-            String gText = "G";
-            int gx = (w - fm.stringWidth(gText)) / 2;
-            int gy = (h - fm.getHeight()) / 2 + fm.getAscent();
-            g2.setColor(new Color(234, 67, 53)); // Đỏ Google
-            g2.drawString(gText, gx, gy);
-        }, () -> JOptionPane.showMessageDialog(this, "Đăng nhập nhanh Google SSO được mô phỏng cho đồ án.", "Google Login", JOptionPane.INFORMATION_MESSAGE)));
-
-        // Nút 2: Discord
-        socialRow.add(createNeumorphicSocialButton("Discord", (g2, w, h) -> {
-            g2.setFont(new Font("Segoe UI", Font.BOLD, 15));
-            FontMetrics fm = g2.getFontMetrics();
-            String dText = "🎮";
-            int dx = (w - fm.stringWidth(dText)) / 2;
-            int dy = (h - fm.getHeight()) / 2 + fm.getAscent();
-            g2.drawString(dText, dx, dy);
-        }, () -> JOptionPane.showMessageDialog(this, "Đăng nhập Discord được mô phỏng cho đồ án.", "Discord Login", JOptionPane.INFORMATION_MESSAGE)));
-
-        // Nút 3: Facebook
-        socialRow.add(createNeumorphicSocialButton("Facebook", (g2, w, h) -> {
-            g2.setFont(new Font("Segoe UI", Font.BOLD, 19));
-            FontMetrics fm = g2.getFontMetrics();
-            String fText = "f";
-            int fx = (w - fm.stringWidth(fText)) / 2;
-            int fy = (h - fm.getHeight()) / 2 + fm.getAscent() - 1;
-            g2.setColor(new Color(24, 119, 242));
-            g2.drawString(fText, fx, fy);
-        }, () -> JOptionPane.showMessageDialog(this, "Đăng nhập Facebook được mô phỏng cho đồ án.", "Facebook Login", JOptionPane.INFORMATION_MESSAGE)));
-
-        // Nút 4: Cấu hình Server (Host/Port cho kết nối LAN & Mạng khác nhau)
-        socialRow.add(createNeumorphicSocialButton("Cấu Hình Host/Port Server", (g2, w, h) -> {
-            g2.setFont(new Font("Segoe UI", Font.BOLD, 15));
-            FontMetrics fm = g2.getFontMetrics();
-            String sText = "⚙";
-            int sx = (w - fm.stringWidth(sText)) / 2;
-            int sy = (h - fm.getHeight()) / 2 + fm.getAscent();
-            g2.setColor(new Color(71, 85, 105));
-            g2.drawString(sText, sx, sy);
-        }, this::showServerConfigDialog));
-
-        cardPanel.add(socialRow);
-
-        cardPanel.add(Box.createVerticalStrut(14));
+        JButton btnSwitchToWeb = new JButton("Mở bản web ↗");
+        btnSwitchToWeb.setFont(new Font("Segoe UI", Font.BOLD, 12));
+        btnSwitchToWeb.setForeground(UIUtils.PRIMARY_BLUE);
+        btnSwitchToWeb.setBorder(new EmptyBorder(8, 10, 8, 10));
+        btnSwitchToWeb.setContentAreaFilled(false);
+        btnSwitchToWeb.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        btnSwitchToWeb.addActionListener(e -> openWebClient());
+        alternateActions.add(btnSwitchToWeb);
+        cardPanel.add(alternateActions);
 
         // 9. Dòng chuyển chế độ Đăng nhập <-> Đăng ký
-        lblToggleMode = new JLabel("<html>Don't have an account? <font color='#2575FC'><b>Sign up</b></font></html>");
+        lblToggleMode = new JLabel("<html>Chưa có tài khoản? <font color='#0F766E'><b>Đăng ký</b></font></html>");
         lblToggleMode.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         lblToggleMode.setForeground(new Color(100, 116, 139));
         lblToggleMode.setCursor(new Cursor(Cursor.HAND_CURSOR));
@@ -442,7 +337,7 @@ public class LoginFrame extends JFrame implements ChatEventListener {
         cardPanel.add(Box.createVerticalStrut(8));
 
         // 10. Thanh trạng thái kết nối
-        lblStatus = new JLabel("● Sẵn sàng kết nối máy chủ (" + serverHost + ":" + serverPort + ")");
+        lblStatus = new JLabel("● Sẵn sàng kết nối (" + serverHost + ":" + serverPort + ")");
         lblStatus.setFont(new Font("Segoe UI", Font.PLAIN, 11));
         lblStatus.setForeground(new Color(148, 163, 184));
         lblStatus.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -455,6 +350,20 @@ public class LoginFrame extends JFrame implements ChatEventListener {
         btnMainAction.addActionListener(e -> performSubmit());
         txtUser.addActionListener(e -> txtPass.requestFocus());
         txtPass.addActionListener(e -> performSubmit());
+    }
+
+    private void openWebClient() {
+        try {
+            URI webUri = new URI("http", null, serverHost, 8080, "/", null, null);
+            if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                throw new UnsupportedOperationException("Không tìm thấy trình duyệt mặc định.");
+            }
+            Desktop.getDesktop().browse(webUri);
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this,
+                    "Không mở được giao diện web tại " + serverHost + ":8080. Hãy kiểm tra máy chủ đang chạy.\n" + ex.getMessage(),
+                    "Không mở được web", JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     /**
@@ -546,15 +455,15 @@ public class LoginFrame extends JFrame implements ChatEventListener {
     private void toggleAuthMode() {
         isRegisterMode = !isRegisterMode;
         if (isRegisterMode) {
-            lblTitle.setText("Create Account");
-            lblSub.setText("Sign up to get started");
-            btnMainAction.setText("Sign Up");
-            lblToggleMode.setText("<html>Already have an account? <font color='#2575FC'><b>Sign in</b></font></html>");
+            lblTitle.setText("Tạo tài khoản");
+            lblSub.setText("Đăng ký để tham gia cuộc trò chuyện");
+            btnMainAction.setText("Đăng ký");
+            lblToggleMode.setText("<html>Đã có tài khoản? <font color='#0F766E'><b>Đăng nhập</b></font></html>");
         } else {
-            lblTitle.setText("Welcome Back");
-            lblSub.setText("Sign in to continue");
-            btnMainAction.setText("Login");
-            lblToggleMode.setText("<html>Don't have an account? <font color='#2575FC'><b>Sign up</b></font></html>");
+            lblTitle.setText("Chào mừng trở lại");
+            lblSub.setText("Đăng nhập để tiếp tục trò chuyện");
+            btnMainAction.setText("Đăng nhập");
+            lblToggleMode.setText("<html>Chưa có tài khoản? <font color='#0F766E'><b>Đăng ký</b></font></html>");
         }
         revalidate();
         repaint();

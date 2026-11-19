@@ -1,0 +1,125 @@
+TÓM TẮT CÔNG NGHỆ VÀ KIẾN TRÚC DỰ ÁN CHAT ROOM
+================================================
+
+1. MỤC TIÊU VÀ PHẠM VI
+----------------------
+Dự án xây dựng hệ thống chat phòng nhiều người theo mô hình Client - Server.
+Ứng dụng desktop bắt buộc sử dụng Java Swing: client Swing để đăng nhập và chat,
+server có dashboard Swing để quản trị. Hệ thống có thêm giao diện web như một phần
+mở rộng; client desktop và web dùng chung dịch vụ, tài khoản, nhóm chat và cơ sở dữ liệu.
+
+Chức năng chính: đăng ký/đăng nhập, phân vai trò USER/ADMIN, chat phòng, chat riêng,
+tạo/tham gia nhóm, quản trị người dùng và nhóm, lưu/tải lịch sử tin nhắn.
+
+2. CÔNG NGHỆ CỐT LÕI
+--------------------
+- Java: ngôn ngữ cho server, client desktop, giao thức và truy cập dữ liệu.
+- Java Swing: giao diện đăng nhập/chat trên desktop và bảng điều khiển server.
+- TCP Socket (ServerSocket/Socket): kênh giao tiếp thời gian thực giữa client desktop
+  và server, mặc định cổng 5000.
+- Đa luồng: server có luồng accept kết nối và dùng ExecutorService để chạy ClientHandler
+  riêng cho mỗi kết nối desktop. Đây là mô hình thread-per-client.
+- Java HttpServer + HTTP API + Server-Sent Events (SSE): phần web mở rộng, mặc định
+  cổng 8080; SSE đẩy sự kiện chat từ server đến trình duyệt.
+- SQLite + JDBC: lưu tài khoản, vai trò, nhóm/thành viên và lịch sử tin nhắn trong file DB.
+- HTML/CSS/JavaScript: giao diện web trong thư mục web/.
+- Batch scripts: compile.bat biên dịch; run_server.bat và run_client.bat chạy server/client;
+  run_tests.bat chạy bộ kiểm thử tích hợp.
+
+3. CÁC THUẬT TOÁN VÀ CƠ CHẾ CHÍNH
+---------------------------------
+3.1. Chấp nhận và xử lý nhiều kết nối
+- ChatServer mở ServerSocket và lặp accept() để nhận kết nối TCP liên tục.
+- Mỗi Socket được bọc trong ClientHandler và đưa vào ExecutorService.
+- ClientHandler đọc gói giao thức theo từng dòng UTF-8, tách lệnh và payload, rồi điều
+  phối đến xử lý đăng nhập, gửi tin, quản trị hoặc tải lịch sử.
+- Danh sách client online dùng ConcurrentHashMap; một số thao tác thêm/xóa client được
+  đồng bộ để tránh hai kết nối cùng đăng nhập một tài khoản.
+
+3.2. Định tuyến tin nhắn
+- Broadcast: phát tin phòng chung đến các kết nối và thông báo web.
+- Private/unicast: tìm người nhận theo username và gửi riêng đến người gửi/người nhận.
+- Tin nhắn nhóm: kiểm tra thành viên và quyền của người gửi trước khi xử lý.
+- Danh sách online, nhóm và sự kiện quản trị được server cập nhật cho client.
+
+3.3. Xác thực và phân quyền
+- Server tra cứu tài khoản trong SQLite và so sánh hash mật khẩu.
+- Mật khẩu được băm SHA-256 cùng một salt dùng chung trong DatabaseConnection.
+- Tài khoản đăng ký mới được gán USER; tài khoản ADMIN được khởi tạo riêng.
+- ClientHandler yêu cầu đăng nhập với các lệnh cần xác thực và kiểm tra vai trò ADMIN
+  hoặc trưởng nhóm với lệnh quản trị.
+- Hỗ trợ trạng thái ACTIVE/MUTED/BANNED và chặn tài khoản bị khóa đăng nhập.
+
+3.4. Lưu và tải lịch sử
+- MessageDAO dùng JDBC PreparedStatement để thêm và truy vấn tin nhắn trong SQLite.
+- Lịch sử được lọc theo phòng, sắp xếp theo id, lấy giới hạn số tin gần nhất và đảo lại
+  thứ tự để hiển thị từ cũ đến mới.
+- Nội dung trong gói lịch sử được mã hóa Base64 UTF-8 để tránh ký tự phân tách làm hỏng
+  cấu trúc gói; Base64 chỉ là mã hóa vận chuyển, không phải mã hóa bảo mật.
+
+4. CÁC FILE/THƯ MỤC CHÍNH
+-------------------------
+- client/ClientMain.java: điểm khởi động giao diện Swing client.
+- client/ui/LoginFrame.java: giao diện đăng nhập/đăng ký và kết nối đến server.
+- client/ui/ChatRoomFrame.java: cửa sổ chat, phòng/nhóm, thành viên và thao tác người dùng.
+- client/network/SocketClient.java: mở TCP socket, gửi lệnh và quản lý kết nối client.
+- client/network/ServerListener.java: đọc và phân tích gói server trả về cho client.
+- client/ui/: các thành phần Swing dùng chung như bong bóng tin nhắn, avatar, nút và dialog.
+- server/ServerMain.java: điểm khởi động server, hỗ trợ dashboard GUI và chế độ CLI.
+- server/ChatServer.java: tạo ServerSocket, thread pool và khởi động dịch vụ web.
+- server/ClientHandler.java: xử lý giao thức và nghiệp vụ cho từng client TCP.
+- server/RoomManager.java: quản lý client online, danh sách và định tuyến tin nhắn.
+- server/ui/ServerGUI.java: dashboard Swing theo dõi và điều khiển server.
+- server/web/WebChatServer.java: HTTP API, phục vụ giao diện web và SSE.
+- server/db/DatabaseConnection.java: khởi tạo SQLite, kết nối DB và hàm băm mật khẩu.
+- server/db/UserDAO.java: đăng ký, đăng nhập và thao tác tài khoản.
+- server/db/MessageDAO.java: lưu, truy vấn và xóa lịch sử tin nhắn.
+- server/db/GroupDAO.java: thao tác nhóm và danh sách thành viên.
+- common/Protocol.java: tên lệnh, phản hồi, vai trò, trạng thái và ký tự phân tách.
+- common/MessagePacket.java: cấu trúc dữ liệu tin nhắn và mã hóa gói lịch sử.
+- common/User.java, common/ChatGroup.java, common/ImageMessage.java: mô hình dữ liệu
+  dùng chung và xử lý nội dung/ảnh.
+- test/SystemIntegrationTest.java: kiểm thử đăng ký, đăng nhập, broadcast, private message,
+  phân quyền và lịch sử.
+- test/ImageMessageIntegrationTest.java, test/web_image_test.js: kiểm thử chức năng ảnh.
+- web/: HTML, CSS, JavaScript và sticker của giao diện trình duyệt.
+- compile.bat, run_server.bat, run_client.bat, run_tests.bat: lệnh biên dịch/chạy/kiểm thử.
+
+5. TRỌNG TÂM KHI THUYẾT TRÌNH
+-----------------------------
+1. Mô hình Client - Server: client không gửi trực tiếp cho nhau; server tiếp nhận,
+   xác thực, xử lý và chuyển tiếp tin nhắn.
+2. Đa luồng: mỗi kết nối TCP có ClientHandler riêng, giúp server phục vụ nhiều client
+   đồng thời.
+3. Giao diện desktop dùng Java Swing: LoginFrame và ChatRoomFrame là các màn hình chính;
+   ServerGUI là giao diện quản trị server.
+4. Giao thức tự định nghĩa: Protocol.java quy định các lệnh đăng ký/đăng nhập, gửi tin,
+   nhận lịch sử và quản trị.
+5. Toàn vẹn dữ liệu: SQLite lưu tài khoản và tin nhắn để dữ liệu còn sau khi server
+   khởi động lại.
+6. Bảo mật và phân quyền: xác thực tại server, role USER/ADMIN, quyền trưởng nhóm,
+   trạng thái mute/ban.
+7. Kiểm thử: SystemIntegrationTest mở server trên cổng riêng và kiểm tra các luồng
+   giao tiếp quan trọng.
+
+6. HẠN CHẾ VÀ HƯỚNG PHÁT TRIỂN
+------------------------------
+- ExecutorService dùng newCachedThreadPool(), có thể tạo nhiều luồng khi tải tăng cao;
+  nên giới hạn pool và thêm timeout/giới hạn kết nối cho hệ thống lớn.
+- SHA-256 với salt dùng chung chưa phải cách lưu mật khẩu tốt cho sản phẩm thực tế.
+  Nên chuyển sang PBKDF2, bcrypt hoặc Argon2 với salt riêng cho mỗi tài khoản.
+- Giao thức TCP hiện không mã hóa TLS. Không nên truyền thông tin nhạy cảm trên mạng
+  công cộng nếu chưa bổ sung TLS và cơ chế bảo vệ phiên.
+- Luồng gửi tin nhóm desktop trong RoomManager.broadcastToGroup hiện gửi gói đến mọi
+  client TCP đang online; cần lọc theo thành viên nhóm để tin chỉ đến đúng người tham gia.
+- Dự án có thêm client web; nếu đề bài chỉ chấm desktop Swing, hãy trình bày web như
+  chức năng mở rộng và nhấn mạnh Swing là giao diện desktop chính.
+
+7. LỆNH CHẠY CƠ BẢN
+-------------------
+Biên dịch:       compile.bat
+Chạy server:     run_server.bat
+Chạy Swing:      run_client.bat
+Chạy kiểm thử:   run_tests.bat
+
+Server cần được khởi động trước client. Cổng mặc định: TCP 5000, HTTP 8080.

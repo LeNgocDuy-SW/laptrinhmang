@@ -76,14 +76,14 @@ public class GroupItemPanel extends JPanel {
 
         // Nền hover hoặc selected
         if (isSelected) {
-            g2.setColor(new Color(239, 246, 255)); // Xanh siêu nhạt
-            g2.fill(new RoundRectangle2D.Float(4, 4, w - 8, h - 8, 14, 14));
-            g2.setColor(new Color(191, 219, 254));
+            g2.setColor(new Color(225, 241, 238));
+            g2.fill(new RoundRectangle2D.Float(4, 4, w - 8, h - 8, 10, 10));
+            g2.setColor(new Color(190, 221, 215));
             g2.setStroke(new BasicStroke(1f));
             g2.draw(new RoundRectangle2D.Float(4, 4, w - 8, h - 8, 14, 14));
         } else if (isHover) {
             g2.setColor(new Color(243, 244, 246));
-            g2.fill(new RoundRectangle2D.Float(4, 4, w - 8, h - 8, 14, 14));
+            g2.fill(new RoundRectangle2D.Float(4, 4, w - 8, h - 8, 10, 10));
         } else if (badgeCount > 0) {
             // Nền nhạt báo hiệu có tin chưa đọc
             g2.setColor(new Color(254, 242, 242)); // Hồng/đỏ rất nhạt

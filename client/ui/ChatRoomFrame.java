@@ -75,7 +75,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
     private JPanel leaderControlsPanel;
 
     public ChatRoomFrame(SocketClient socketClient, String username, String role) {
-        super("Multi-Client Chat - " + username + " (" + role + ")");
+        super("Chat Room - " + username + " (" + role + ")");
         this.socketClient = socketClient;
         this.currentUsername = username;
         this.currentRole = role;
@@ -105,8 +105,8 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
     }
 
     private void initComponents() {
-        setSize(1200, 750);
-        setMinimumSize(new Dimension(1020, 620));
+        setSize(1280, 800);
+        setMinimumSize(new Dimension(1080, 660));
         setLocationRelativeTo(null);
         setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
 
@@ -129,7 +129,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
     // =========================================================================
     private JPanel createLeftSidebar() {
         JPanel sidebar = new JPanel(new BorderLayout(0, 14));
-        sidebar.setPreferredSize(new Dimension(290, 0));
+        sidebar.setPreferredSize(new Dimension(260, 0));
         sidebar.setBackground(UIUtils.BG_SIDEBAR);
         sidebar.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 0, 0, 1, UIUtils.BORDER_LIGHT),
@@ -145,7 +145,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
 
         JPanel nameCol = new JPanel(new GridLayout(2, 1, 0, 2));
         nameCol.setOpaque(false);
-        JLabel lblHello = new JLabel("Hello there");
+        JLabel lblHello = new JLabel("ĐANG ĐĂNG NHẬP");
         lblHello.setFont(new Font("Segoe UI", Font.PLAIN, 11));
         lblHello.setForeground(UIUtils.TEXT_MUTED);
 
@@ -167,10 +167,18 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         txtSearchLeft.setPreferredSize(new Dimension(250, 36));
         txtSearchLeft.addCaretListener(e -> filterSidebar());
 
-        JPanel topSection = new JPanel(new BorderLayout(0, 12));
+        JPanel topSection = new JPanel(new BorderLayout(0, 14));
         topSection.setOpaque(false);
-        topSection.add(profileHeader, BorderLayout.NORTH);
-        topSection.add(txtSearchLeft, BorderLayout.SOUTH);
+        JLabel brand = new JLabel("CHAT ROOM");
+        brand.setFont(new Font("Segoe UI", Font.BOLD, 17));
+        brand.setForeground(UIUtils.PRIMARY_BLUE);
+        brand.setBorder(new EmptyBorder(2, 2, 0, 0));
+        JPanel profileAndSearch = new JPanel(new BorderLayout(0, 12));
+        profileAndSearch.setOpaque(false);
+        profileAndSearch.add(profileHeader, BorderLayout.NORTH);
+        profileAndSearch.add(txtSearchLeft, BorderLayout.SOUTH);
+        topSection.add(brand, BorderLayout.NORTH);
+        topSection.add(profileAndSearch, BorderLayout.CENTER);
         sidebar.add(topSection, BorderLayout.NORTH);
 
         // 3. Scrollable List: Favourites & Groups
@@ -179,21 +187,21 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         scrollContent.setOpaque(false);
 
         // Mục Favourites
-        JLabel lblFav = new JLabel("Favourites");
+        JLabel lblFav = new JLabel("PHÒNG CHAT");
         lblFav.setFont(new Font("Segoe UI", Font.BOLD, 13));
         lblFav.setForeground(UIUtils.TEXT_SECONDARY);
         lblFav.setAlignmentX(Component.LEFT_ALIGNMENT);
         scrollContent.add(lblFav);
         scrollContent.add(Box.createVerticalStrut(8));
 
-        favouritesCard = new RoomCard("Friends & Family", "25 Jun, 2022", 1, 0, () -> onSelectGroup("Friends & Family"));
+        favouritesCard = new RoomCard("Friends & Family", "Phòng mặc định", 1, 0, () -> onSelectGroup("Friends & Family"));
         favouritesCard.setSelected(true);
         favouritesCard.setAlignmentX(Component.LEFT_ALIGNMENT);
         scrollContent.add(favouritesCard);
         scrollContent.add(Box.createVerticalStrut(16));
 
         // Mục Groups
-        JLabel lblGroups = new JLabel("Groups (Nhóm Người Dùng Tạo)");
+        JLabel lblGroups = new JLabel("NHÓM CỦA BẠN");
         lblGroups.setFont(new Font("Segoe UI", Font.BOLD, 13));
         lblGroups.setForeground(UIUtils.TEXT_SECONDARY);
         lblGroups.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -235,7 +243,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         lblChatTitle.setFont(new Font("Segoe UI", Font.BOLD, 18));
         lblChatTitle.setForeground(UIUtils.TEXT_DARK);
 
-        lblChatSubtitle = new JLabel("🟢 1 Online");
+        lblChatSubtitle = new JLabel("1 người đang hoạt động");
         lblChatSubtitle.setFont(new Font("Segoe UI", Font.PLAIN, 11));
         lblChatSubtitle.setForeground(UIUtils.ONLINE_GREEN);
 
@@ -246,13 +254,13 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         JPanel headerRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         headerRight.setOpaque(false);
 
-        PillButton btnCreateGroupQuick = new PillButton("✨ Tạo Nhóm", PillButton.Style.SECONDARY);
-        btnCreateGroupQuick.setPreferredSize(new Dimension(105, 32));
+        PillButton btnCreateGroupQuick = new PillButton("+ Tạo nhóm", PillButton.Style.SECONDARY);
+        btnCreateGroupQuick.setPreferredSize(new Dimension(100, 34));
         btnCreateGroupQuick.addActionListener(e -> new CreateGroupDialog(this, socketClient).setVisible(true));
         headerRight.add(btnCreateGroupQuick);
 
-        PillButton btnJoinGroupQuick = new PillButton("🔑 Tham Gia Nhóm", PillButton.Style.PRIMARY);
-        btnJoinGroupQuick.setPreferredSize(new Dimension(135, 32));
+        PillButton btnJoinGroupQuick = new PillButton("Tham gia", PillButton.Style.PRIMARY);
+        btnJoinGroupQuick.setPreferredSize(new Dimension(100, 34));
         btnJoinGroupQuick.addActionListener(e -> new JoinGroupDialog(this, socketClient, "").setVisible(true));
         headerRight.add(btnJoinGroupQuick);
 
@@ -262,12 +270,12 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         // 2. Khung bong bóng tin nhắn
         messagesContainer = new JPanel();
         messagesContainer.setLayout(new BoxLayout(messagesContainer, BoxLayout.Y_AXIS));
-        messagesContainer.setBackground(Color.WHITE);
-        messagesContainer.setBorder(new EmptyBorder(10, 0, 10, 0));
+        messagesContainer.setBackground(UIUtils.BG_MAIN);
+        messagesContainer.setBorder(new EmptyBorder(20, 16, 20, 16));
 
         scrollMessages = new JScrollPane(messagesContainer);
-        scrollMessages.setBackground(Color.WHITE);
-        scrollMessages.getViewport().setBackground(Color.WHITE);
+        scrollMessages.setBackground(UIUtils.BG_MAIN);
+        scrollMessages.getViewport().setBackground(UIUtils.BG_MAIN);
         scrollMessages.setBorder(BorderFactory.createEmptyBorder());
         scrollMessages.getVerticalScrollBar().setUI(new ModernScrollBarUI());
         scrollMessages.getVerticalScrollBar().setUnitIncrement(16);
@@ -278,7 +286,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         // 3. Thanh trả lời tin nhắn (Reply Preview) + Thanh nhập liệu Pill
         JPanel bottomWrap = new JPanel(new BorderLayout(0, 6));
         bottomWrap.setBackground(Color.WHITE);
-        bottomWrap.setBorder(new EmptyBorder(8, 20, 16, 20));
+        bottomWrap.setBorder(new EmptyBorder(10, 24, 18, 24));
 
         replyPreviewBar = new JPanel(new BorderLayout(8, 0));
         replyPreviewBar.setBackground(new Color(239, 246, 255));
@@ -334,7 +342,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         txtChatInput.setFont(new Font("Segoe UI", Font.PLAIN, 14));
         txtChatInput.setForeground(UIUtils.TEXT_DARK);
         txtChatInput.setCaretColor(UIUtils.PRIMARY_BLUE);
-        txtChatInput.putClientProperty("JTextField.placeholderText", "Type a message...");
+        txtChatInput.putClientProperty("JTextField.placeholderText", "Viết tin nhắn...");
 
         JPanel inputActionsRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 2));
         inputActionsRight.setOpaque(false);
@@ -346,8 +354,8 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         btnEmoji.setCursor(new Cursor(Cursor.HAND_CURSOR));
         btnEmoji.addActionListener(e -> showEmojiPicker());
 
-        btnSend = new PillButton("Send", PillButton.Style.PRIMARY);
-        btnSend.setPreferredSize(new Dimension(78, 38));
+        btnSend = new PillButton("Gửi", PillButton.Style.PRIMARY);
+        btnSend.setPreferredSize(new Dimension(72, 38));
 
         inputActionsRight.add(btnEmoji);
         inputActionsRight.add(btnSend);
@@ -367,7 +375,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
     // =========================================================================
     private JPanel createRightSidebar() {
         JPanel right = new JPanel(new BorderLayout(0, 12));
-        right.setPreferredSize(new Dimension(270, 0));
+        right.setPreferredSize(new Dimension(250, 0));
         right.setBackground(Color.WHITE);
         right.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 1, 0, 0, UIUtils.BORDER_LIGHT),
@@ -380,7 +388,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
 
         JPanel infoTitleRow = new JPanel(new BorderLayout());
         infoTitleRow.setOpaque(false);
-        JLabel lblGInfo = new JLabel("Group Info");
+        JLabel lblGInfo = new JLabel("THÔNG TIN PHÒNG");
         lblGInfo.setFont(new Font("Segoe UI", Font.BOLD, 12));
         lblGInfo.setForeground(UIUtils.TEXT_MUTED);
 
@@ -402,11 +410,11 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
 
         JPanel metaCol = new JPanel(new GridLayout(2, 1, 0, 4));
         metaCol.setOpaque(false);
-        JLabel lblDetails = new JLabel("👥 Group details: Phòng chat bảo mật");
+        JLabel lblDetails = new JLabel("Phòng trò chuyện");
         lblDetails.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         lblDetails.setForeground(UIUtils.TEXT_SECONDARY);
 
-        JLabel lblDate = new JLabel("📅 25 Jun, 2022");
+        JLabel lblDate = new JLabel("Thành viên và trạng thái trực tuyến");
         lblDate.setFont(new Font("Segoe UI", Font.PLAIN, 12));
         lblDate.setForeground(UIUtils.TEXT_MUTED);
 
@@ -414,7 +422,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         metaCol.add(lblDate);
         topInfo.add(metaCol, BorderLayout.SOUTH);
 
-        PillTextField txtSearchInChat = new PillTextField("Search in chat", "🔍");
+        PillTextField txtSearchInChat = new PillTextField("Tìm trong cuộc trò chuyện", "⌕");
         txtSearchInChat.setPreferredSize(new Dimension(230, 34));
 
         JPanel topSection = new JPanel(new BorderLayout(0, 12));
@@ -430,7 +438,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         JPanel memberHeaderRow = new JPanel(new BorderLayout());
         memberHeaderRow.setOpaque(false);
 
-        lblRightMemberCount = new JLabel("Members");
+        lblRightMemberCount = new JLabel("Thành viên");
         lblRightMemberCount.setFont(new Font("Segoe UI", Font.BOLD, 13));
         lblRightMemberCount.setForeground(UIUtils.TEXT_DARK);
 
@@ -547,7 +555,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
 
         lblChatTitle.setText(groupName);
         lblChatTitle.setForeground(UIUtils.TEXT_DARK);
-        lblChatSubtitle.setText("🟢 " + Math.max(1, onlineUsers.size()) + " Online");
+            lblChatSubtitle.setText(Math.max(1, onlineUsers.size()) + " người đang hoạt động");
         lblRightGroupTitle.setText(groupName);
 
         // Xóa tin nhắn cũ trên màn hình và yêu cầu Server nạp lịch sử + danh sách thành viên nhóm
@@ -651,7 +659,7 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
         for (GroupItemPanel g : groupPanels) g.setSelected(false);
 
         lblChatTitle.setText("🔒 Chat riêng với: @" + target);
-        lblChatTitle.setForeground(new Color(124, 58, 237));
+        lblChatTitle.setForeground(UIUtils.TEXT_DARK);
         lblChatSubtitle.setText("Cuộc trò chuyện bảo mật 1-1");
         lblRightGroupTitle.setText("@" + target);
 
@@ -691,8 +699,8 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
                 item.setAlignmentX(Component.LEFT_ALIGNMENT);
                 membersListContainer.add(item);
             }
-            lblRightMemberCount.setText("Thành viên nhóm (" + groupMembers.size() + ")");
-            lblChatSubtitle.setText("👥 " + groupMembers.size() + " Thành viên • 🟢 " + Math.max(1, onlineInGrp) + " Online");
+            lblRightMemberCount.setText("Thành viên (" + groupMembers.size() + ")");
+            lblChatSubtitle.setText(groupMembers.size() + " thành viên • " + onlineInGrp + " đang hoạt động");
         } else {
             User me = new User(currentUsername, currentRole, isMuted ? Protocol.STATUS_MUTED : Protocol.STATUS_ACTIVE);
             MemberItemPanel meItem = new MemberItemPanel(me, true, () -> {});
@@ -705,13 +713,13 @@ public class ChatRoomFrame extends JFrame implements ChatEventListener {
                 item.setAlignmentX(Component.LEFT_ALIGNMENT);
                 membersListContainer.add(item);
             }
-            lblRightMemberCount.setText("Members (" + onlineUsers.size() + ")");
+            lblRightMemberCount.setText("Người đang trực tuyến (" + onlineUsers.size() + ")");
             if (privateChatTarget == null) {
-                lblChatSubtitle.setText("👥 " + Math.max(1, onlineUsers.size()) + " Thành viên • 🟢 " + Math.max(1, onlineUsers.size()) + " Online");
+                lblChatSubtitle.setText(onlineUsers.size() + " người đang hoạt động");
             }
         }
 
-        favouritesCard.setOnlineCount(Math.max(1, onlineUsers.size()));
+        favouritesCard.setOnlineCount(onlineUsers.size());
 
         membersListContainer.revalidate();
         membersListContainer.repaint();

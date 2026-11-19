@@ -102,7 +102,7 @@ public class PillButton extends JButton {
             int d = Math.min(w, h);
             g2.fill(new Ellipse2D.Float((w - d) / 2f, (h - d) / 2f, d, d));
         } else {
-            int arc = h;
+            int arc = Math.min(h, 12);
             g2.fill(new RoundRectangle2D.Float(0, 0, w, h, arc, arc));
             if (style == Style.SECONDARY) {
                 g2.setColor(UIUtils.BORDER_LIGHT);

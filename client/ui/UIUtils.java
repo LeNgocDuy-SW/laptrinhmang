@@ -7,17 +7,17 @@ import java.awt.geom.RoundRectangle2D;
  * UIUtils: Cung cấp màu sắc, font chữ và các hàm hỗ trợ vẽ Graphics2D hiện đại.
  */
 public class UIUtils {
-    // Bảng màu hiện đại theo phong cách thiết kế Dribbble / Figma
-    public static final Color BG_MAIN = new Color(244, 245, 249);
+    // Neutral surfaces with a restrained teal accent.
+    public static final Color BG_MAIN = new Color(243, 246, 245);
     public static final Color BG_CARD = Color.WHITE;
-    public static final Color BG_SIDEBAR = new Color(248, 249, 251);
+    public static final Color BG_SIDEBAR = new Color(248, 250, 249);
 
-    public static final Color PRIMARY_BLUE = new Color(29, 114, 254);
-    public static final Color PRIMARY_HOVER = new Color(21, 94, 212);
+    public static final Color PRIMARY_BLUE = new Color(15, 118, 110);
+    public static final Color PRIMARY_HOVER = new Color(17, 94, 89);
 
     // Màu bong bóng chat
-    public static final Color BUBBLE_MY_BG = new Color(214, 228, 255); // Soft blue pastel
-    public static final Color BUBBLE_MY_TEXT = new Color(26, 46, 80);
+    public static final Color BUBBLE_MY_BG = new Color(220, 242, 238);
+    public static final Color BUBBLE_MY_TEXT = new Color(20, 62, 57);
     public static final Color BUBBLE_OTHER_BG = Color.WHITE;
     public static final Color BUBBLE_OTHER_TEXT = new Color(31, 41, 55);
     public static final Color BUBBLE_PRIVATE_BG = new Color(237, 233, 254); // Lavender pastel

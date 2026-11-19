@@ -26,7 +26,8 @@ public class RoomCard extends JPanel {
         this.unreadCount = unreadCount;
 
         setOpaque(false);
-        setPreferredSize(new Dimension(240, 130));
+        setPreferredSize(new Dimension(228, 68));
+        setMaximumSize(new Dimension(Integer.MAX_VALUE, 68));
         setCursor(new Cursor(Cursor.HAND_CURSOR));
 
         addMouseListener(new MouseAdapter() {
@@ -75,36 +76,44 @@ public class RoomCard extends JPanel {
 
         int w = getWidth();
         int h = getHeight();
-        int arc = 20;
-
-        // 1. Nền Card trắng bo cong với viền nổi bật nếu được chọn
-        g2.setColor(Color.WHITE);
-        g2.fill(new RoundRectangle2D.Float(0, 0, w, h, arc, arc));
-
+        int arc = 10;
         if (isSelected) {
+            g2.setColor(new Color(225, 241, 238));
+            g2.fill(new RoundRectangle2D.Float(2, 2, w - 4, h - 4, arc, arc));
             g2.setColor(UIUtils.PRIMARY_BLUE);
-            g2.setStroke(new BasicStroke(2f));
+            g2.fillRoundRect(2, 12, 3, h - 24, 3, 3);
         } else if (isHover) {
-            g2.setColor(new Color(203, 213, 225));
-            g2.setStroke(new BasicStroke(1.2f));
-        } else {
-            g2.setColor(UIUtils.BORDER_LIGHT);
-            g2.setStroke(new BasicStroke(1f));
+            g2.setColor(new Color(239, 243, 242));
+            g2.fill(new RoundRectangle2D.Float(2, 2, w - 4, h - 4, arc, arc));
         }
-        g2.draw(new RoundRectangle2D.Float(1, 1, w - 2, h - 2, arc, arc));
 
-        // 2. Tiêu đề phòng chat
+        int avSize = 42;
+        int avX = 12;
+        int avatarY = (h - avSize) / 2;
+        Color[] colors = UIUtils.getAvatarGradient(title);
+        g2.setPaint(new GradientPaint(avX, avatarY, colors[0], avX + avSize, avatarY + avSize, colors[1]));
+        g2.fill(new Ellipse2D.Float(avX, avatarY, avSize, avSize));
+        g2.setColor(Color.WHITE);
         g2.setFont(new Font("Segoe UI", Font.BOLD, 15));
-        g2.setColor(UIUtils.TEXT_DARK);
-        g2.drawString(title, 14, 28);
+        String initial = title.isEmpty() ? "?" : title.substring(0, 1).toUpperCase();
+        FontMetrics initialMetrics = g2.getFontMetrics();
+        g2.drawString(initial, avX + (avSize - initialMetrics.stringWidth(initial)) / 2,
+                avatarY + (avSize - initialMetrics.getHeight()) / 2 + initialMetrics.getAscent());
 
-        // Huy hiệu tin nhắn mới (chấm đỏ hoặc số) phong cách Messenger
+        int textX = avX + avSize + 10;
+        g2.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        g2.setColor(UIUtils.TEXT_DARK);
+        g2.drawString(title, textX, avatarY + 17);
+        g2.setFont(new Font("Segoe UI", Font.PLAIN, 11));
+        g2.setColor(UIUtils.TEXT_SECONDARY);
+        g2.drawString(onlineCount + " đang hoạt động", textX, avatarY + 33);
+
         if (unreadCount > 0) {
             String bText = unreadCount > 99 ? "99+" : String.valueOf(unreadCount);
             int bw = unreadCount > 9 ? 26 : 20;
             int bh = 20;
-            int bx = w - 14 - bw;
-            int by = 14;
+            int bx = w - 12 - bw;
+            int by = (h - bh) / 2;
 
             g2.setColor(UIUtils.BADGE_RED);
             g2.fill(new RoundRectangle2D.Float(bx, by, bw, bh, 12, 12));
@@ -116,54 +125,6 @@ public class RoomCard extends JPanel {
             int bty = by + ((bh - bfm.getHeight()) / 2) + bfm.getAscent();
             g2.drawString(bText, btx, bty);
         }
-
-        // 3. Hàng ngày tháng & Tag Online
-        g2.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        g2.setColor(UIUtils.TEXT_MUTED);
-        g2.drawString("📅 " + dateText, 14, 52);
-
-        // Tag Online xanh lá bo tròn (Green Pill Tag)
-        String tagText = "🟢 " + onlineCount + " Online";
-        int tagW = 80;
-        int tagH = 20;
-        int tagX = 14 + g2.getFontMetrics().stringWidth("📅 " + dateText) + 10;
-        int tagY = 38;
-
-        g2.setColor(new Color(236, 253, 245)); // Xanh nhạt
-        g2.fill(new RoundRectangle2D.Float(tagX, tagY, tagW, tagH, tagH, tagH));
-        g2.setColor(new Color(5, 150, 105)); // Xanh đậm
-        g2.setFont(new Font("Segoe UI", Font.BOLD, 10));
-        g2.drawString(tagText, tagX + 8, tagY + 14);
-
-        // 4. Ngăn xếp Avatar (Avatar Stack) + Thẻ +5
-        g2.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        g2.setColor(UIUtils.TEXT_SECONDARY);
-        g2.drawString("Members", 14, 82);
-
-        int startX = 14;
-        int avatarY = 92;
-        int avSize = 24;
-        int overlap = 18;
-
-        String[] sampleNames = {"Alice", "Bob", "Charlie", "David", "Eve"};
-        for (int i = 0; i < Math.min(4, sampleNames.length); i++) {
-            int curX = startX + (i * overlap);
-            Color[] colors = UIUtils.getAvatarGradient(sampleNames[i]);
-            g2.setColor(Color.WHITE);
-            g2.fill(new Ellipse2D.Float(curX - 1, avatarY - 1, avSize + 2, avSize + 2)); // Viền trắng
-            g2.setPaint(new GradientPaint(curX, avatarY, colors[0], curX + avSize, avatarY + avSize, colors[1]));
-            g2.fill(new Ellipse2D.Float(curX, avatarY, avSize, avSize));
-        }
-
-        // Pill "+5"
-        int plusX = startX + (4 * overlap);
-        int plusW = 28;
-        int plusH = avSize;
-        g2.setColor(new Color(241, 245, 249));
-        g2.fill(new RoundRectangle2D.Float(plusX, avatarY, plusW, plusH, plusH, plusH));
-        g2.setColor(UIUtils.PRIMARY_BLUE);
-        g2.setFont(new Font("Segoe UI", Font.BOLD, 10));
-        g2.drawString("+5", plusX + 6, avatarY + 16);
 
         g2.dispose();
     }
